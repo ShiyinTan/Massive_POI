@@ -1,0 +1,26 @@
+origin_venue_id,dest_venue_id,count,origin_name,dest_name,origin_category,dest_category
+164,366,25,中山公园地铁站 | Zhongshan Park Metro Stn.,China Unicom 中国联通,Metro Station,Building
+1096,712,20,香港新世界大厦,,Office,Residential Building (Apartment / Condo)
+209,754,18,People's Square Metro Stn. (人民广场地铁站),Changshu Rd. Metro Stn. (常熟路地铁站),Metro Station,Metro Station
+712,1096,15,,香港新世界大厦,Residential Building (Apartment / Condo),Office
+2865,2866,14,宝山路鸿兴路站,海德拉的巢穴,Bus Station,Residential Building (Apartment / Condo)
+366,164,14,China Unicom 中国联通,中山公园地铁站 | Zhongshan Park Metro Stn.,Building,Metro Station
+2088,1579,11,可的 | Kedi,,Convenience Store,Home (private)
+2770,366,11,Canteen,China Unicom 中国联通,Restaurant,Building
+2468,195,9,Hollister Co.,Carl's Jr. (卡乐星),Clothing Store,Burger Joint
+754,209,9,Changshu Rd. Metro Stn. (常熟路地铁站),People's Square Metro Stn. (人民广场地铁站),Metro Station,Metro Station
+366,396,8,China Unicom 中国联通,Shanghai's City of Books (上海书城),Building,Bookstore
+848,480,8,国泰电影院 | Cathay Theater,苏浙汇 | Jade Garden,Multiplex,Asian Restaurant
+276,209,8,Hanzhong Rd. Metro Stn. (汉中路地铁站),People's Square Metro Stn. (人民广场地铁站),Metro Station,Metro Station
+1333,1579,7,The Roof,,Lounge,Home (private)
+366,2770,7,China Unicom 中国联通,Canteen,Building,Restaurant
+2741,332,7,Qian Xuesen Library & Museum (钱学森图书馆),徐家汇 | Xujiahui,Museum,Plaza
+777,2004,7,上海站 | Shanghai Railway Station,Shanghai Luwan Library | 上海卢湾区图书馆,Train Station,Library
+723,1050,6,,Dell Shanghai Office,Coffee Shop,Office
+1648,1579,6,Taipan Spa 丽晶大班休闲SPA,,Spa,Home (private)
+1525,1050,6,McDonald's 麦当劳,Dell Shanghai Office,Fast Food Restaurant,Office
+1206,164,6,凯德龙之梦,中山公园地铁站 | Zhongshan Park Metro Stn.,Shopping Mall,Metro Station
+459,232,6,Xujiahui Metro Stn. (徐家汇地铁站),美罗城 | Metro City,Metro Station,Shopping Mall
+396,366,6,Shanghai's City of Books (上海书城),China Unicom 中国联通,Bookstore,Building
+728,209,6,Dashijie Metro Stn. (大世界地铁站),People's Square Metro Stn. (人民广场地铁站),Metro Station,Metro Station
+209,728,6,People's Square Metro Stn. (人民广场地铁站),Dashijie Metro Stn. (大世界地铁站),Metro Station,Metro Station

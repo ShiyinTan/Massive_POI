@@ -1,0 +1,26 @@
+origin_venue_id,dest_venue_id,count,origin_name,dest_name,origin_category,dest_category
+567,1332,33,Southern Cross Station,Boronia Station,Train Station,Train Station
+3979,1578,21,Fitness First,First Choice Liquor Market,Gym,Liquor Store
+2376,3518,18,Altona Gate,Nando's,Shopping Mall,Portuguese Restaurant
+1762,912,17,Box Hill Station,Elsternwick Station,Train Station,Train Station
+1463,659,16,Melbourne Central Station,Footscray Station,Metro Station,Train Station
+567,4264,16,Southern Cross Station,Global Health,Train Station,Office
+4076,4364,15,,Land Of Nod,Home (private),Other Nightlife
+1332,567,15,Boronia Station,Southern Cross Station,Train Station,Train Station
+2435,679,13,Centro Espresso Caffè,Optus,Café,Office
+5008,2572,13,In A Rush,ANZ Centre,Café,Office
+2087,5968,13,DJ's Gym,Reachlocal,Gym,Building
+531,1463,12,Melbourne Central,Melbourne Central Station,Shopping Mall,Metro Station
+4046,1117,12,Rive Gauche Patisserie,HWT Tower,Café,Office
+3050,2394,12,O'Brien Icehouse,Harbour Town Hotel,Skating Rink,Pub
+531,1095,11,Melbourne Central,HOYTS,Shopping Mall,Multiplex
+1703,4490,11,Sir Robert Risson Tram Terminus (Stop 1 - 19/57/59),Tram 57: City <=> West Maribyrnong,Light Rail Station,Light Rail Station
+388,1703,11,Flinders Street Station,Sir Robert Risson Tram Terminus (Stop 1 - 19/57/59),Train Station,Light Rail Station
+912,5464,11,Elsternwick Station,D'Gusto Thai,Train Station,Thai Restaurant
+4076,4072,11,,St Stephens Richmond,Home (private),Church
+537,912,10,Richmond Station,Elsternwick Station,Train Station,Train Station
+3285,1515,10,Cancer Council Victoria,IMAX Melbourne,Non-Profit,Movie Theater
+1515,531,10,IMAX Melbourne,Melbourne Central,Movie Theater,Shopping Mall
+2572,4262,10,ANZ Centre,Unilodge on Swanston,Office,College Residence Hall
+4072,4076,10,St Stephens Richmond,,Church,Home (private)
+4364,4076,10,Land Of Nod,,Other Nightlife,Home (private)
