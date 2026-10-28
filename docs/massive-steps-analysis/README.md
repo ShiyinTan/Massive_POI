@@ -1,25 +1,22 @@
-# Massive-STEPS dataset analysis
+# Massive-STEPS 分析（精简）
 
-Analysis notes, figures, and companion CSVs for the [Massive-STEPS](https://github.com/cruiseresearchgroup/Massive-STEPS) POI check-in dataset, developed for Massive_POI.
+面向 Massive_POI 的 Massive-STEPS 数据集分析交付物。
 
-## Reports
+## 入口
 
-| Report | Description |
-|--------|-------------|
-| [massive-steps-dataset-analysis.md](massive-steps-dataset-analysis.md) | Dataset profile, cited city scale, measured distributions |
-| [massive-steps-research-angles.md](massive-steps-research-angles.md) | Research questions, baselines, spatial/OD figures |
-| [massive-steps-top-venue-topics.md](massive-steps-top-venue-topics.md) | Cheap baselines, weekend metrics, split-stability topics |
-| [massive-steps-temporal-baselines.md](massive-steps-temporal-baselines.md) | Temporal baselines and trail-duration analysis |
-| [massive-steps-map-overlays.md](massive-steps-map-overlays.md) | Basemap flow overlays (Tokyo / Melbourne / Beijing / Shanghai) |
-| [massive-steps-minimal-maps.md](massive-steps-minimal-maps.md) | Minimal grey basemap bubble and flow maps |
+**主报告（中文）：** [massive-steps-analysis.md](massive-steps-analysis.md)
 
-## Artifact directories
+覆盖：数据集概览 / 字段 / 分布、研究角度与廉价基线（含时间条件 MostPop）、切分稳定性、周末指标、轨迹时间跨度、极简灰底地图、优先课题。
 
-- `massive-steps-figures/` — dataset-profile plots
-- `massive-steps-research-figures/` — research evidence and city OD / density figures
-- `massive-steps-split-stability/` — Acc@1 by split protocol
-- `massive-steps-temporal-baselines/` — temporal Acc@1 and trail duration
-- `massive-steps-map-overlays/` — street-basemap flow overlays + CSVs
-- `massive-steps-minimal-maps/` — minimal basemap bubbles/flows + CSVs
+## 目录
 
-Companion CSVs for the research reports live alongside the markdown in this directory (`massive-steps-research-*.csv`, `massive-steps-measured-summary.csv`, `massive-steps-cited-city-table.csv`).
+| 路径 | 内容 |
+|------|------|
+| `massive-steps-analysis.md` | 合并后的唯一报告 |
+| `massive-steps-cited-city-table.csv` | 15 城规模表 |
+| `massive-steps-measured-summary.csv` | 10 城实测分布摘要 |
+| `figures/` | 规模与分布、证据快照、基线、切分、时长图 |
+| `data/` | 研究证据、基线、切分稳定性、时间条件 CSV |
+| `maps/` | 极简灰底气泡 / 流向图及格子·OD CSV（Tokyo / Melbourne / Beijing / Shanghai） |
+
+已移除：彩色街道路网叠加图、早期无底图 desire-line / hexbin / choropleth 等被极简地图替代的视觉稿，以及被合并报告取代的多份旧 markdown。
