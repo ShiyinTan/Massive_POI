@@ -1,0 +1,9 @@
+city,split,n_test,n_target_weekday_ne_first,n_target_daynight_ne_first,frac_target_weekday_ne_first,frac_target_daynight_ne_first,day_bin,night_bin,prediction_time,train_day_frac,n_test_users
+Tokyo,official,1097,103,377,0.09389243391066546,0.3436645396536007,"[7,19)","[19,24) U [0,7)",target_last_checkin_timestamp,0.5191414714683728,
+Tokyo,user_disjoint,1018,82,327,0.08055009823182711,0.3212180746561886,"[7,19)","[19,24) U [0,7)",target_last_checkin_timestamp,,153.0
+Melbourne,official,1573,279,576,0.17736808645899554,0.36617927527018435,"[7,19)","[19,24) U [0,7)",target_last_checkin_timestamp,0.4142291977430443,
+Melbourne,user_disjoint,1414,267,525,0.18882602545968882,0.3712871287128713,"[7,19)","[19,24) U [0,7)",target_last_checkin_timestamp,,129.0
+Beijing,official,115,4,41,0.034782608695652174,0.3565217391304348,"[7,19)","[19,24) U [0,7)",target_last_checkin_timestamp,0.5909961685823755,
+Beijing,user_disjoint,100,3,35,0.03,0.35,"[7,19)","[19,24) U [0,7)",target_last_checkin_timestamp,,11.0
+Shanghai,official,728,36,241,0.04945054945054945,0.33104395604395603,"[7,19)","[19,24) U [0,7)",target_last_checkin_timestamp,0.6372881355932203,
+Shanghai,user_disjoint,783,37,258,0.04725415070242656,0.32950191570881227,"[7,19)","[19,24) U [0,7)",target_last_checkin_timestamp,,59.0

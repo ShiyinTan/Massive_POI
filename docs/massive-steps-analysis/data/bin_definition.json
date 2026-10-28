@@ -1,0 +1,11 @@
+{
+  "prediction_time": "target (last) check-in timestamp \u2014 never trail first timestamp",
+  "SameWeekdayMostPop": "Mon..Sun via pandas Timestamp.dayofweek (Mon=0)",
+  "DayNightMostPop": {
+    "day": "hour in [7, 19)",
+    "night": "hour in [19, 24) U [0, 7)",
+    "justification": "7\u201319 brackets typical daytime activity / commute window; city-agnostic and season-stable vs sunrise/sunset"
+  },
+  "SameHourBinMostPop": "hour // 4 (prior temporal baseline, for comparison)",
+  "fallback": "empty conditional bucket falls back to global MostPop"
+}
