@@ -1,0 +1,13 @@
+city,split,n_train_checkins,n_test_checkins,n_train_trails,n_test_trails,n_train_users,n_test_users,n_user_overlap,user_overlap_frac
+Tokyo,official,9691,2791,3836,1097,761,647,644,0.9953632148377125
+Tokyo,user_disjoint,11214,2625,4464,1018,611,153,0,0.0
+Tokyo,time_based,11205,2634,4386,1096,730,353,319,0.9036827195467422
+Melbourne,official,15419,4475,5504,1573,642,583,579,0.9931389365351629
+Melbourne,user_disjoint,17630,4420,6266,1598,517,129,0,0.0
+Melbourne,time_based,17873,4177,6291,1573,473,278,105,0.3776978417266187
+Beijing,official,1044,285,400,115,56,52,52,1.0
+Beijing,user_disjoint,1118,352,433,140,45,11,0,0.0
+Beijing,time_based,1200,270,458,115,51,22,17,0.7727272727272727
+Shanghai,official,7375,2090,2544,728,296,259,259,1.0
+Shanghai,user_disjoint,9136,1355,3136,500,237,59,0,0.0
+Shanghai,time_based,8614,1877,2909,727,214,131,49,0.37404580152671757

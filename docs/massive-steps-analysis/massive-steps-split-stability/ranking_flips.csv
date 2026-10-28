@@ -1,0 +1,5 @@
+city,official_order,user_disjoint_order,time_based_order,official_vs_user_disjoint_same,official_vs_time_based_same,user_disjoint_vs_time_based_same,top1_official,top1_user_disjoint,top1_time_based,top1_flipped
+Tokyo,UserMostPop > Markov1 > CatMarkov > MostPop > Nearest,Markov1 > CatMarkov > MostPop > UserMostPop > Nearest,UserMostPop > Markov1 > CatMarkov > MostPop > Nearest,False,True,False,UserMostPop,Markov1,UserMostPop,True
+Melbourne,UserMostPop > Markov1 > Nearest > CatMarkov > MostPop,Nearest > Markov1 > CatMarkov > MostPop > UserMostPop,Nearest > Markov1 > UserMostPop > MostPop > CatMarkov,False,False,False,UserMostPop,Nearest,Nearest,True
+Beijing,UserMostPop > Markov1 > CatMarkov > MostPop > Nearest,Markov1 > Nearest > CatMarkov > MostPop > UserMostPop,UserMostPop > Nearest > Markov1 > CatMarkov > MostPop,False,False,False,UserMostPop,Markov1,UserMostPop,True
+Shanghai,UserMostPop > Markov1 > CatMarkov > Nearest > MostPop,Nearest > Markov1 > MostPop > UserMostPop > CatMarkov,UserMostPop > Nearest > Markov1 > MostPop > CatMarkov,False,False,False,UserMostPop,Nearest,UserMostPop,True
