@@ -1,0 +1,5 @@
+city,MostPop,DayNightMostPop,SameWeekdayMostPop,SameHourBinMostPop,UserMostPop,UserMostPop_DayNight,UserMostPop_Weekday,UserMostPop_WorkWeekend,n_test,n_users
+Tokyo,,,,,,,,,0,0
+Melbourne,,,,,,,,,0,0
+Beijing,,,,,,,,,0,0
+Shanghai,,,,,,,,,0,0
