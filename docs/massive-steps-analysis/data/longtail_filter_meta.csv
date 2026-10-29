@@ -1,0 +1,9 @@
+city,split,min_train_checkins,min_per_bin,bin_requirements,n_elig_train_users,n_test_unfiltered,n_users_unfiltered,n_test_filtered,n_users_filtered,frac_test_kept
+Tokyo,official,5,2,day>=M & night>=M & work>=M & weekend>=M (local),289,1097,647,666,276,0.6071103008204193
+Tokyo,user_disjoint,5,2,day>=M & night>=M & work>=M & weekend>=M (local),303,1018,153,0,0,0.0
+Melbourne,official,5,2,day>=M & night>=M & work>=M & weekend>=M (local),377,1573,583,1286,362,0.817546090273363
+Melbourne,user_disjoint,5,2,day>=M & night>=M & work>=M & weekend>=M (local),371,1414,129,0,0,0.0
+Beijing,official,5,2,day>=M & night>=M & work>=M & weekend>=M (local),31,115,52,91,30,0.7913043478260869
+Beijing,user_disjoint,5,2,day>=M & night>=M & work>=M & weekend>=M (local),32,100,11,0,0,0.0
+Shanghai,official,5,2,day>=M & night>=M & work>=M & weekend>=M (local),157,728,259,581,148,0.7980769230769231
+Shanghai,user_disjoint,5,2,day>=M & night>=M & work>=M & weekend>=M (local),163,783,59,0,0,0.0
