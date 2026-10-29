@@ -6,7 +6,7 @@
 
 **主报告（中文）：** [massive-steps-analysis.md](massive-steps-analysis.md)
 
-覆盖：数据集概览 / 字段 / 分布、研究角度与廉价基线（含时间条件 MostPop）、切分稳定性、周末指标、轨迹时间跨度、极简灰底地图、优先课题。
+覆盖：数据集概览 / 字段 / 分布、研究角度与廉价基线（含 **event-time** SameWeekday / DayNight / SameHourBin MostPop）、切分稳定性、周末指标、轨迹时间跨度、极简灰底地图、优先课题。
 
 ## 目录
 

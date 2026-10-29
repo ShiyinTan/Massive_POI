@@ -96,9 +96,14 @@ Massive-STEPS = 城市级、可复现的 **next-POI / semantic trajectory** 基�
 | **Markov1** | 一阶 POI→POI 转移（看当前站）；不足回退 MostPop |
 | **Nearest** | 相对当前站 Haversine 最近其他 POI |
 | **CatMarkov** | 类别一阶转移 → 类内 MostPop 消歧 |
-| **SameWeekdayMostPop** | 按 target 的 weekday 桶频次；空桶回退 MostPop |
-| **SameHourBinMostPop** | `hour_bin = hour // 4`（6 个 4h 箱） |
+| **SameWeekdayMostPop** | 按 **target（末站）** weekday 桶频次；空桶回退 MostPop |
+| **DayNightMostPop** | 按 **target hour** 的 Day/Night 二桶；空桶回退 MostPop |
+| **SameHourBinMostPop** | `hour_bin = hour // 4`（6 个 4h 箱；对照） |
 | **SameWeekdayHourMostPop** | `(weekday, hour_bin)` 联合桶 |
+
+**预测时刻（强制）：** 一律用 **target POI 的 check-in timestamp**（轨迹末事件时间），**不用** trail 首 timestamp。official 上约 **32–37%** trails 的 target 与 first 落在不同 Day/Night 桶；weekday 不一致约 **3–19%**（见 [`data/event_time_meta.csv`](data/event_time_meta.csv)）——用 trail start 会系统性错桶。
+
+**Day/Night 切分：** **Day = hour ∈ [7, 19)，Night = 其余**。取 7–19 以对齐典型日间活动 / 通勤窗，跨城季节稳定（不依赖日出日落）；敏感度上 6–18 与 7–19 Acc@1 接近，8–20 仅 Tokyo 抬升、Melbourne 更差。
 
 ### 3.2 官方 split 基线 [measured]
 
@@ -117,20 +122,42 @@ Massive-STEPS = 城市级、可复现的 **next-POI / semantic trajectory** 基�
 
 ### 3.3 时间条件 MostPop [measured]
 
-完整表：[`data/temporal_baselines.csv`](data/temporal_baselines.csv) · 图：[`figures/temporal_baselines_acc1.png`](figures/temporal_baselines_acc1.png)
+完整表：[`data/temporal_baselines.csv`](data/temporal_baselines.csv) · weekday/day-night：[`data/weekday_daynight_baselines.csv`](data/weekday_daynight_baselines.csv) · 图：[`figures/temporal_baselines_acc1.png`](figures/temporal_baselines_acc1.png)
 
 ![Acc@1 temporal](figures/temporal_baselines_acc1.png)
 
-**Official Acc@1（摘要）**
+**Official Acc@1（含 DayNight；对照 MostPop / SameHourBin）**
 
-| city | MostPop | SameWeekday | SameHourBin | SameWeekdayHour | UserMostPop | Markov1 |
-|------|--------:|------------:|------------:|----------------:|------------:|--------:|
-| Tokyo | 0.034 | 0.040 | 0.048 | **0.051** | **0.186** | 0.120 |
-| Melbourne | 0.011 | 0.013 | 0.011 | 0.010 | **0.106** | 0.065 |
-| Beijing | 0.139 | 0.087 | 0.148 | 0.148 | **0.304** | 0.226 |
-| Shanghai | 0.022 | 0.023 | **0.037** | 0.036 | **0.114** | 0.066 |
+| city | MostPop | SameWeekday | DayNight | SameHourBin | SameWeekdayHour |
+|------|--------:|------------:|---------:|------------:|----------------:|
+| Tokyo | 0.034 | 0.040 | 0.034 | **0.048** | **0.051** |
+| Melbourne | 0.011 | **0.013** | 0.010 | 0.011 | 0.010 |
+| Beijing | 0.139 | 0.087 | 0.139 | **0.148** | 0.148 |
+| Shanghai | 0.022 | 0.023 | 0.025 | **0.037** | 0.036 |
 
-**结论：** 时间条件相对全局 MostPop 仅有**小幅**增益（Tokyo +1.7pp），远小于 UserMostPop / Markov1；hour-bin 通常优于 weekday；时间是弱全局先验，宜作特征/分层，不宜作主基线。user-disjoint 下个性化消失后，SameHourBin 在 Tokyo/Beijing 可明显抬升 MostPop。
+**Official Acc@5 / Acc@10（SameWeekday · DayNight）**
+
+| city | SameWeekday @5/@10 | DayNight @5/@10 |
+|------|-------------------:|----------------:|
+| Tokyo | 0.103 / 0.149 | 0.106 / 0.157 |
+| Melbourne | 0.039 / 0.063 | 0.041 / 0.067 |
+| Beijing | 0.174 / 0.191 | 0.217 / 0.261 |
+| Shanghai | 0.055 / 0.074 | 0.065 / 0.088 |
+
+**User-disjoint Acc@1（摘要）**
+
+| city | MostPop | SameWeekday | DayNight | SameHourBin | n_test |
+|------|--------:|------------:|---------:|------------:|-------:|
+| Tokyo | 0.038 | 0.038 | 0.038 | **0.064** | 1018 |
+| Melbourne | 0.006 | 0.006 | 0.006 | **0.010** | 1414 |
+| Beijing | 0.210 | 0.150 | 0.210 | **0.260** | 100 |
+| Shanghai | 0.014 | **0.017** | 0.014 | 0.008 | 783 |
+
+**结论：**  
+1. **DayNight ≈ MostPop（Acc@1）**：二桶过粗，几乎不改 Top-1；@5/@10 有时略好于 MostPop（Tokyo/Beijing/Mel）。  
+2. **SameWeekday** 相对 MostPop 仅小幅增益（Tokyo +0.6pp；Beijing 反而更差）。  
+3. **SameHourBin（4h）仍是时间条件里最强的廉价桶**，显著优于 DayNight / weekday。  
+4. 时间是弱全局先验；user-disjoint 下 SameHourBin 在 Tokyo/Beijing 抬升最明显。
 
 ### 3.4 Weekend 三项指标
 
@@ -258,5 +285,5 @@ Massive-STEPS = 城市级、可复现的 **next-POI / semantic trajectory** 基�
 | [`massive-steps-cited-city-table.csv`](massive-steps-cited-city-table.csv) | 15 城规模表 |
 | [`massive-steps-measured-summary.csv`](massive-steps-measured-summary.csv) | 10 城实测分布摘要 |
 | [`figures/`](figures/) | 规模/分布、证据快照、基线、切分、时长图 |
-| [`data/`](data/) | 研究/基线/切分/时间条件 CSV |
+| [`data/`](data/) | 研究/基线/切分/时间条件 CSV（含 `weekday_daynight_baselines.csv` · `event_time_meta.csv` · `bin_definition.json`） |
 | [`maps/`](maps/) | 极简灰底气泡与流向图 + OD/格子 CSV |
