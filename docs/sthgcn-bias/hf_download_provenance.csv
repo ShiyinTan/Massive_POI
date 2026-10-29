@@ -1,0 +1,5 @@
+city,hf_repo,n_full,n_train,n_val,n_test,covers_full_csv,device,sthgcn_fork,config
+Tokyo,CRUISEResearchGroup/Massive-STEPS-Tokyo,13839,9691,1357,2791,True,cpu,w11wo/Spatio-Temporal-Hypergraph-Model@758c50b,conf/std_conf/tokyo.yml
+Beijing,CRUISEResearchGroup/Massive-STEPS-Beijing,1470,1044,141,285,True,cpu,w11wo/Spatio-Temporal-Hypergraph-Model@758c50b,conf/std_conf/beijing.yml
+Shanghai,CRUISEResearchGroup/Massive-STEPS-Shanghai,10491,7375,1026,2090,True,cpu,w11wo/Spatio-Temporal-Hypergraph-Model@758c50b,conf/std_conf/shanghai.yml
+Melbourne,CRUISEResearchGroup/Massive-STEPS-Melbourne,22050,15419,2156,4475,True,cpu,w11wo/Spatio-Temporal-Hypergraph-Model@758c50b,conf/std_conf/melbourne.yml
