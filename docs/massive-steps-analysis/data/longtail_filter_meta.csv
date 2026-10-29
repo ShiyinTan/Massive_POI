@@ -1,5 +1,16 @@
-city,split,min_train_checkins,min_per_bin,bin_requirements,n_elig_train_users,n_test_unfiltered,n_users_unfiltered,n_test_filtered,n_users_filtered,frac_test_kept
-Tokyo,official,5,2,day>=M & night>=M & work>=M & weekend>=M (local),289,1097,647,666,276,0.6071103008204193
-Melbourne,official,5,2,day>=M & night>=M & work>=M & weekend>=M (local),377,1573,583,1286,362,0.817546090273363
-Beijing,official,5,2,day>=M & night>=M & work>=M & weekend>=M (local),31,115,52,91,30,0.7913043478260869
-Shanghai,official,5,2,day>=M & night>=M & work>=M & weekend>=M (local),157,728,259,581,148,0.7980769230769231
+city,split,min_train_checkins,min_per_bin,rule,n_users_kept,n_test_unfiltered,n_test_users_unfiltered,n_test_filtered,n_test_users_filtered,retain_frac,n_train_rows,n_test_rows,covers_full_csv,hf_dataset_id
+Tokyo,official,5,2,day>=M & night>=M & work>=M & weekend>=M (local),289,1097,647,666,276,0.6071103008204193,9691,2791,True,CRUISEResearchGroup/Massive-STEPS-Tokyo
+Melbourne,official,5,2,day>=M & night>=M & work>=M & weekend>=M (local),377,1573,583,1286,362,0.817546090273363,15419,4475,True,CRUISEResearchGroup/Massive-STEPS-Melbourne
+Beijing,official,5,2,day>=M & night>=M & work>=M & weekend>=M (local),31,115,52,91,30,0.7913043478260869,1044,285,True,CRUISEResearchGroup/Massive-STEPS-Beijing
+Shanghai,official,5,2,day>=M & night>=M & work>=M & weekend>=M (local),157,728,259,581,148,0.7980769230769231,7375,2090,True,CRUISEResearchGroup/Massive-STEPS-Shanghai
+Sydney,official,5,2,day>=M & night>=M & work>=M & weekend>=M (local),435,2030,679,1678,414,0.8266009852216749,21027,5896,True,CRUISEResearchGroup/Massive-STEPS-Sydney
+Palembang,official,5,2,day>=M & night>=M & work>=M & weekend>=M (local),200,940,256,858,199,0.9127659574468086,10132,2848,True,CRUISEResearchGroup/Massive-STEPS-Palembang
+Moscow,official,5,2,day>=M & night>=M & work>=M & weekend>=M (local),1945,7897,3993,5273,1945,0.667721919716348,74113,21034,True,CRUISEResearchGroup/Massive-STEPS-Moscow
+New-York,official,5,2,day>=M & night>=M & work>=M & weekend>=M (local),4296,18409,6227,15616,4045,0.8482807322505296,190740,54427,True,CRUISEResearchGroup/Massive-STEPS-New-York
+Sao-Paulo,official,5,2,day>=M & night>=M & work>=M & weekend>=M (local),3551,17938,5440,14491,3438,0.8078381090422566,179771,51428,True,CRUISEResearchGroup/Massive-STEPS-Sao-Paulo
+Bandung,official,5,2,day>=M & night>=M & work>=M & weekend>=M (local),2278,11067,3201,9578,2228,0.8654558597632601,113058,32208,True,CRUISEResearchGroup/Massive-STEPS-Bandung
+Istanbul,official,5,2,day>=M & night>=M & work>=M & weekend>=M (local),11561,43283,21264,29821,10957,0.6889771965898852,380986,108885,True,CRUISEResearchGroup/Massive-STEPS-Istanbul
+Jakarta,official,5,2,day>=M & night>=M & work>=M & weekend>=M (local),5583,27480,7958,23867,5498,0.8685225618631732,288339,82483,True,CRUISEResearchGroup/Massive-STEPS-Jakarta
+Kuwait-City,official,5,2,day>=M & night>=M & work>=M & weekend>=M (local),4639,18332,8718,12995,4439,0.7088697359807986,162716,46614,True,CRUISEResearchGroup/Massive-STEPS-Kuwait-City
+Petaling-Jaya,official,5,2,day>=M & night>=M & work>=M & weekend>=M (local),8610,36082,14308,29418,8610,0.8153095726400975,354817,101105,True,CRUISEResearchGroup/Massive-STEPS-Petaling-Jaya
+Tangerang,official,5,2,day>=M & night>=M & work>=M & weekend>=M (local),827,3197,1318,2556,796,0.7994995308101345,32085,8937,True,CRUISEResearchGroup/Massive-STEPS-Tangerang
