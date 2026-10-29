@@ -1,0 +1,5 @@
+city,tz,n_official_test_trails,target_hour_utc_vs_local_mismatch,target_weekday_utc_vs_local_mismatch,target_daynight_utc_vs_local_mismatch,target_hourbin_utc_vs_local_mismatch,target_vs_first_daynight_mismatch_utc,target_vs_first_daynight_mismatch_local,all_checkins_hour_mismatch,all_checkins_weekday_mismatch
+Tokyo,Asia/Tokyo,1097,1.0,0.12579762989972654,0.740200546946217,1.0,0.3436645396536007,0.2534184138559708,1.0,0.11149649541151817
+Melbourne,Australia/Melbourne,1573,1.0,0.08645899554990465,0.8334392879847425,1.0,0.36617927527018435,0.31913541004450097,1.0,0.14303854875283448
+Beijing,Asia/Shanghai,115,1.0,0.02608695652173913,0.7739130434782608,1.0,0.3565217391304348,0.3826086956521739,1.0,0.04081632653061224
+Shanghai,Asia/Shanghai,728,1.0,0.059065934065934064,0.6813186813186813,1.0,0.33104395604395603,0.3159340659340659,1.0,0.04594414259841769
