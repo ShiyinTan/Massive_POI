@@ -1,0 +1,13 @@
+{
+  "timestamp_treatment": "HF/Massive-STEPS timestamps are naive datetimes with timezone offset stripped (no +00:00 / Z suffix). Prior temporal baselines extracted hour/weekday directly from these naive fields (= interpret-as-UTC / as-stored). Local mode: tz_localize('UTC') then tz_convert(IANA city zone).",
+  "city_iana_tz": {
+    "Tokyo": "Asia/Tokyo",
+    "Melbourne": "Australia/Melbourne",
+    "Beijing": "Asia/Shanghai",
+    "Shanghai": "Asia/Shanghai"
+  },
+  "DayNightMostPop": "Day = hour in [7, 19); Night = otherwise",
+  "SameHourBinMostPop": "hour_bin = hour // 4 (6 bins)",
+  "SameWeekdayMostPop": "weekday = Mon..Sun from target (last) check-in timestamp",
+  "prediction_time": "target (last) check-in timestamp on the trail; never trail start"
+}
