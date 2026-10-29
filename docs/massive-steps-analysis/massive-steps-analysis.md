@@ -241,7 +241,23 @@ IANA 与桶定义：[`data/bin_definition.json`](data/bin_definition.json) · �
 3. **SameWeekday**：Beijing Acc@1 从 0.087→0.113（+2.6pp）——跨日界造成的 weekday 错桶最伤小样本城。  
 4. **结论不变：** 时间仍是弱全局先验，**SameHourBin 仍是最强廉价时间桶**；解释行为节律请用 **local**，复现旧表请用 **UTC-as-stored**。本专题时间桶表 **仅报 official**。
 
-### 3.4 时间 / 个性化基线总表 + 长尾过滤 [measured · official · local]
+### 3.4 时间 / 个性化基线总表 + 长尾过滤 [measured · official · local · **full HF**]
+
+**数据确认（本表）：** 使用 CRUISE Massive-STEPS **完整** HF city CSV（`*_checkins_{train,validation,test}.csv` 行数之和 = `*_checkins.csv`；**无** city/row subsample）。fit = official train；eval = official test。下载与校验：[`data/hf_download_provenance.csv`](data/hf_download_provenance.csv)。
+
+| city | HF dataset ID | train rows | test trails | covers_full |
+|------|---------------|----------:|------------:|:-----------:|
+| Tokyo | `CRUISEResearchGroup/Massive-STEPS-Tokyo` | 9691 | 1097 | ✓ |
+| Melbourne | `…-Melbourne` | 15419 | 1573 | ✓ |
+| Beijing | `…-Beijing` | 1044 | 115 | ✓ |
+| Shanghai | `…-Shanghai` | 7375 | 728 | ✓ |
+| Sydney | `…-Sydney` | 21027 | 2030 | ✓ |
+| Palembang | `…-Palembang` | 10132 | 940 | ✓ |
+| Moscow | `…-Moscow` | 74113 | 7897 | ✓ |
+| New-York | `…-New-York` | 190740 | 18409 | ✓ |
+| Sao-Paulo | `…-Sao-Paulo` | 179771 | 17938 | ✓ |
+
+Collection：[Massive-STEPS HF](https://huggingface.co/collections/CRUISEResearchGroup/massive-steps-point-of-interest-check-in-dataset-682716f625d74c2569bc7a73)。下载：`hf download CRUISEResearchGroup/Massive-STEPS-{City} --repo-type dataset`。
 
 **定义（伪代码；prediction time = 被预测 check-in 的 local timestamp）：**
 
@@ -254,7 +270,7 @@ predict:  # t = check-in being predicted (= trail last); time = t.timestamp
 # bin ∈ {daynight, weekday, workweekend}
 ```
 
-**长尾过滤（个性化 / 时段桶评测）：** 仅保留 train 上满足  
+**长尾过滤（个性化 / 时段桶评测；唯一允许的行过滤）：** 仅保留 train 上满足  
 **≥5 check-ins** 且 **day≥2 & night≥2** 且 **work≥2 & weekend≥2**（本地时）的用户的 test trails。  
 元数据：[`data/longtail_filter_meta.csv`](data/longtail_filter_meta.csv) · 定义：[`data/bin_definition.json`](data/bin_definition.json)。  
 **主表 = filtered**；unfiltered 对照同文件族。
@@ -263,38 +279,65 @@ CSV：[`data/acc1_full_comparison_official_local.csv`](data/acc1_full_comparison
 
 ![Full comparison Acc@1](figures/full_comparison_acc1_official_local.png)
 
-**图注：** 官方·本地时八模型 Acc@1；左 filtered（主表）、右 unfiltered。UMP_DN 仍最强个性化；UMP_WorkWeekend systematically 优于稀疏的 UMP_Weekday，但通常仍低于 UserMostPop / UMP_DN。
+**图注：** 九城官方·本地时八模型 Acc@1（完整 HF）；左 filtered（主表）、右 unfiltered。UMP_DN 仍多为最强个性化；UMP_WorkWeekend systematically 优于稀疏的 UMP_Weekday。
 
 #### Official Acc@1（local · **filtered** · primary）
 
-| city | MostPop | DayNight | SameWD | HourBin | UserMostPop | **UMP_DN** | UMP_WD | UMP_WW | n_test | n_users |
-|------|--------:|---------:|-------:|--------:|------------:|-----------:|-------:|-------:|-------:|--------:|
+| city | MostPop | DayNight | SameWD | HourBin | UMP | **UMP_DN** | UMP_WD | UMP_WW | n_test | n_users |
+|------|--------:|---------:|-------:|--------:|----:|-----------:|-------:|-------:|-------:|--------:|
 | Tokyo | 0.026 | 0.026 | 0.026 | 0.035 | 0.200 | **0.216** | 0.165 | 0.174 | 666 | 276 |
 | Melbourne | 0.011 | 0.008 | 0.011 | 0.009 | **0.120** | 0.117 | 0.081 | 0.111 | 1286 | 362 |
 | Beijing | 0.176 | 0.187 | 0.143 | 0.187 | 0.341 | **0.385** | 0.220 | 0.330 | 91 | 30 |
 | Shanghai | 0.022 | 0.033 | 0.024 | 0.043 | 0.098 | **0.102** | 0.095 | 0.093 | 581 | 148 |
-
-（保留比例：Tokyo 61% · Mel 82% · BJ 79% · SH 80% of test trails。）
+| Sydney | 0.004 | 0.001 | 0.005 | 0.011 | **0.143** | 0.140 | 0.107 | 0.120 | 1678 | 414 |
+| Palembang | 0.019 | 0.019 | 0.019 | 0.019 | 0.182 | **0.190** | 0.107 | 0.172 | 858 | 199 |
+| Moscow | 0.009 | 0.013 | 0.009 | 0.015 | 0.190 | **0.204** | 0.139 | 0.178 | 5273 | 1945 |
+| New-York | 0.007 | 0.006 | 0.006 | 0.007 | 0.098 | **0.115** | 0.077 | 0.095 | 15616 | 4045 |
+| Sao-Paulo | 0.009 | 0.009 | 0.009 | 0.008 | 0.145 | **0.173** | 0.114 | 0.141 | 14491 | 3438 |
 
 #### Official Acc@1（local · unfiltered）
 
-| city | MostPop | DayNight | SameWD | HourBin | UserMostPop | **UMP_DN** | UMP_WD | UMP_WW | n_test | n_users |
-|------|--------:|---------:|-------:|--------:|------------:|-----------:|-------:|-------:|-------:|--------:|
+| city | MostPop | DayNight | SameWD | HourBin | UMP | **UMP_DN** | UMP_WD | UMP_WW | n_test | n_users |
+|------|--------:|---------:|-------:|--------:|----:|-----------:|-------:|-------:|-------:|--------:|
 | Tokyo | 0.034 | 0.034 | 0.038 | 0.047 | 0.186 | **0.202** | 0.158 | 0.165 | 1097 | 647 |
 | Melbourne | 0.011 | 0.010 | 0.013 | 0.010 | **0.106** | 0.104 | 0.074 | 0.099 | 1573 | 583 |
 | Beijing | 0.139 | 0.148 | 0.113 | 0.148 | 0.304 | **0.357** | 0.200 | 0.296 | 115 | 52 |
 | Shanghai | 0.022 | 0.029 | 0.023 | 0.037 | 0.114 | **0.118** | 0.106 | 0.109 | 728 | 259 |
+| Sydney | 0.003 | 0.001 | 0.005 | 0.010 | **0.133** | 0.131 | 0.099 | 0.111 | 2030 | 679 |
+| Palembang | 0.017 | 0.017 | 0.017 | 0.017 | 0.169 | **0.179** | 0.101 | 0.162 | 940 | 256 |
+| Moscow | 0.011 | 0.015 | 0.010 | 0.017 | 0.165 | **0.174** | 0.126 | 0.155 | 7897 | 3993 |
+| New-York | 0.008 | 0.007 | 0.008 | 0.007 | 0.095 | **0.108** | 0.074 | 0.092 | 18409 | 6227 |
+| Sao-Paulo | 0.009 | 0.009 | 0.009 | 0.008 | 0.143 | **0.169** | 0.113 | 0.140 | 17938 | 5440 |
 
-#### Official Acc@5 / Acc@10（local · filtered）
+#### Official Acc@5（local · filtered）
 
-| city | UMP @5 | UMP_DN @5 | UMP_WW @5 | UMP @10 | UMP_DN @10 | UMP_WW @10 |
-|------|-------:|----------:|----------:|--------:|-----------:|-----------:|
-| Tokyo | 0.399 | **0.417** | 0.377 | 0.488 | **0.489** | 0.470 |
-| Melbourne | 0.257 | **0.259** | 0.240 | **0.329** | 0.320 | 0.309 |
-| Beijing | **0.505** | 0.495 | 0.451 | 0.538 | 0.516 | **0.549** |
-| Shanghai | 0.210 | **0.212** | 0.203 | 0.250 | **0.263** | 0.255 |
+| city | MostPop | DayNight | SameWD | HourBin | UMP | **UMP_DN** | UMP_WD | UMP_WW | n_test |
+|------|--------:|---------:|-------:|--------:|----:|-----------:|-------:|-------:|-------:|
+| Tokyo | 0.074 | 0.111 | 0.084 | 0.129 | 0.399 | **0.417** | 0.378 | 0.377 | 666 |
+| Melbourne | 0.033 | 0.039 | 0.037 | 0.048 | 0.257 | **0.259** | 0.218 | 0.240 | 1286 |
+| Beijing | 0.264 | 0.264 | 0.209 | 0.253 | **0.505** | 0.495 | 0.451 | 0.451 | 91 |
+| Shanghai | 0.062 | 0.076 | 0.065 | 0.065 | 0.210 | **0.212** | 0.181 | 0.203 | 581 |
+| Sydney | 0.013 | 0.037 | 0.018 | 0.047 | 0.299 | **0.300** | 0.253 | 0.283 | 1678 |
+| Palembang | 0.082 | 0.082 | 0.082 | 0.085 | **0.337** | 0.336 | 0.288 | 0.321 | 858 |
+| Moscow | 0.035 | 0.043 | 0.040 | 0.051 | 0.391 | **0.391** | 0.354 | 0.379 | 5273 |
+| New-York | 0.019 | 0.019 | 0.019 | 0.024 | 0.244 | **0.255** | 0.214 | 0.235 | 15616 |
+| Sao-Paulo | 0.022 | 0.025 | 0.022 | 0.026 | 0.372 | **0.382** | 0.334 | 0.371 | 14491 |
 
-**读数：** (1) **UMP_WorkWeekend ≫ UMP_Weekday**（二桶缓解 7 路稀疏），但仍通常 ≤ UserMostPop / UMP_DN。(2) 过滤后 UMP_DN 在 Tokyo/Beijing 相对 UMP 的抬升仍在（+1.6 / +4.4pp）。(3) 全局时间桶仍远弱于个性化。
+#### Official Acc@10（local · filtered）
+
+| city | MostPop | DayNight | SameWD | HourBin | UMP | **UMP_DN** | UMP_WD | UMP_WW | n_test |
+|------|--------:|---------:|-------:|--------:|----:|-----------:|-------:|-------:|-------:|
+| Tokyo | 0.140 | 0.167 | 0.138 | 0.197 | 0.488 | **0.489** | 0.488 | 0.470 | 666 |
+| Melbourne | 0.054 | 0.061 | 0.062 | 0.078 | **0.329** | 0.320 | 0.300 | 0.309 | 1286 |
+| Beijing | 0.286 | 0.319 | 0.242 | 0.308 | 0.538 | 0.516 | 0.484 | **0.549** | 91 |
+| Shanghai | 0.086 | 0.095 | 0.091 | 0.095 | 0.250 | **0.263** | 0.234 | 0.255 | 581 |
+| Sydney | 0.033 | 0.061 | 0.036 | 0.086 | 0.361 | **0.365** | 0.337 | 0.353 | 1678 |
+| Palembang | 0.101 | 0.108 | 0.107 | 0.118 | **0.429** | 0.408 | 0.385 | 0.392 | 858 |
+| Moscow | 0.063 | 0.067 | 0.065 | 0.075 | 0.463 | **0.468** | 0.452 | 0.457 | 5273 |
+| New-York | 0.029 | 0.032 | 0.028 | 0.034 | 0.306 | **0.313** | 0.284 | 0.299 | 15616 |
+| Sao-Paulo | 0.036 | 0.039 | 0.038 | 0.044 | 0.455 | **0.462** | 0.437 | 0.455 | 14491 |
+
+**读数：** (1) 四城核心 Acc 与先前 full-HF 数字一致（Tokyo/Mel/BJ/SH 未 subsample）。(2) **UMP_DN** 在多数城（含 New-York / Sao-Paulo / Moscow）仍抬升 Acc@1。(3) **UMP_WW ≫ UMP_WD**；全局时间桶仍远弱于个性化。
 
 ### 3.5 Weekend 三项指标
 
@@ -440,5 +483,5 @@ CSV：[`data/acc1_full_comparison_official_local.csv`](data/acc1_full_comparison
 | [`massive-steps-cited-city-table.csv`](massive-steps-cited-city-table.csv) | 15 城规模表 |
 | [`massive-steps-measured-summary.csv`](massive-steps-measured-summary.csv) | 10 城实测分布摘要 |
 | [`figures/`](figures/) | 规模/分布、UTC–local 时段、证据、基线、UMP 时段、切分、时长图 |
-| [`data/`](data/) | 研究/基线/切分/时间条件（含 `utc_local_*`、`usermostpop_time_bins*`）CSV |
+| [`data/`](data/) | 研究/基线/切分/时间条件（含 `utc_local_*`、`usermostpop_time_bins*`、`hf_download_provenance.csv`、full-HF Acc 总表）CSV |
 | [`maps/`](maps/) | 极简灰底气泡与流向图 + OD/格子 CSV |
