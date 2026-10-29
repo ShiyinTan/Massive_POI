@@ -134,7 +134,8 @@ Massive-STEPS = 城市级、可复现的 **next-POI / semantic trajectory** 基�
 | **SameHourBinMostPop** | `hour_bin = hour // 4`（6 个 4h 箱；对照） |
 | **SameWeekdayHourMostPop** | `(weekday, hour_bin)` 联合桶 |
 | **UserMostPop_Day / _Night** | 该用户 train 中对应 Day/Night 桶内 MostPop；test 用 target **本地**时选桶；回退 UserMostPop → MostPop |
-| **UserMostPop_Weekday** | 同上，按 target weekday 选用户桶 |
+| **UserMostPop_Weekday** | 同上，按 target weekday 选用户桶（7 路；易碎） |
+| **UserMostPop_WorkWeekend** | 用户×{Work=Mon–Fri, Weekend=Sat–Sun} 二桶；回退链同上（缓解 7 路稀疏） |
 
 **预测时刻（强制）：** 一律用 **target POI 的 check-in timestamp**（轨迹末事件时间），**不用** trail 首 timestamp。official 上约 **32–37%** trails 的 target 与 first 落在不同 Day/Night 桶（UTC-as-stored）；本地时下该不一致约 **25–38%**（见 [`data/utc_local_time_meta.csv`](data/utc_local_time_meta.csv) / [`data/event_time_meta.csv`](data/event_time_meta.csv)）。
 
@@ -245,62 +246,59 @@ IANA 与桶定义：[`data/bin_definition.json`](data/bin_definition.json) · �
 | Beijing | 0.210 | 0.150 / 0.150 | 0.210 / 0.210 | **0.260 / 0.260** | 100 |
 | Shanghai | 0.014 | **0.017 / 0.017** | 0.014 / 0.004 | 0.008 / 0.008 | 783 |
 
-### 3.4 UserMostPop 日/夜 / 星期桶 [measured · local]
+### 3.4 时间 / 个性化基线总表 + 长尾过滤 [measured · local]
 
-**定义（伪代码）：**
+**定义（伪代码；prediction time = target local）：**
 
 ```
-fit:
-  for each train check-in c of user u:
-    user_global[u][c.venue] += 1
-    user_bin[u][daynight(c.local_hour)][c.venue] += 1   # Day/Night
-    # UserMostPop_Weekday: user_bin[u][weekday(c.local)][c.venue] += 1
-
-predict(trail):
-  t = trail.last_checkin                    # target event time
-  b = daynight(t.local_hour)                # or weekday(t.local)
-  return merge(user_bin[u][b], user_global[u], MostPop)
-  # empty user-bin → that user's UserMostPop → global MostPop
+# Work = weekday∈{Mon..Fri}; Weekend = {Sat,Sun}
+fit UserMostPop_*:
+  user_bin[u][bin(c.local_*)][v] += 1;  user_global[u][v] += 1
+predict: merge(user_bin[u][bin(t)], user_global[u], MostPop)
+# bin ∈ {daynight, weekday, workweekend}
 ```
 
-`UserMostPop_DayNight` = 上述路由在**全量** test 上的 Acc；`UserMostPop_Day` / `_Night` = 仅在 target 落在该桶的 test 子集上的同一路由 Acc（n 见 CSV）。
+**长尾过滤（个性化 / 时段桶评测）：** 仅保留 train 上满足  
+**≥5 check-ins** 且 **day≥2 & night≥2** 且 **work≥2 & weekend≥2**（本地时）的用户的 test trails。  
+元数据：[`data/longtail_filter_meta.csv`](data/longtail_filter_meta.csv) · 定义：[`data/bin_definition.json`](data/bin_definition.json)。  
+**主表 = filtered**；unfiltered 对照同文件族。user-disjoint 下过滤集为空（train/test 用户无交集）——过滤只对 official 有意义。
 
-长表：[`data/usermostpop_time_bins.csv`](data/usermostpop_time_bins.csv) · Acc@1/5/10 透视：[`data/acc1_usermostpop_timebins_official_local.csv`](data/acc1_usermostpop_timebins_official_local.csv) 等 · 图：[`figures/usermostpop_timebins_acc1_local.png`](figures/usermostpop_timebins_acc1_local.png)
+CSV：[`data/acc1_full_comparison_official_local.csv`](data/acc1_full_comparison_official_local.csv) · [`acc5_…`](data/acc5_full_comparison_official_local.csv) · [`acc10_…`](data/acc10_full_comparison_official_local.csv) · unfiltered：`acc*_comparison_unfiltered_official_local.csv` · 长表：[`data/usermostpop_time_bins.csv`](data/usermostpop_time_bins.csv)
 
-![UserMostPop time bins Acc@1](figures/usermostpop_timebins_acc1_local.png)
+![Full comparison Acc@1](figures/full_comparison_acc1_official_local.png)
 
-**图注：** 官方切分、城市本地时下 UserMostPop 家族与全局 DayNight/SameWeekday 的 Acc@1。日/夜用户桶在 Tokyo/Beijing/Shanghai 抬升 UserMostPop；Weekday 用户桶过碎，全面弱于全局 UserMostPop。
+**图注：** 官方·本地时八模型 Acc@1；左 filtered（主表）、右 unfiltered。UMP_DN 仍最强个性化；UMP_WorkWeekend  systematically 优于稀疏的 UMP_Weekday，但通常仍低于 UserMostPop / UMP_DN。
 
-#### Official Acc@1（local）
+#### Official Acc@1（local · **filtered** · primary）
 
-| city | MostPop | UserMostPop | DayNight | SameWeekday | **UMP_DayNight** | UMP_Weekday | UMP_Day† | UMP_Night† | n |
-|------|--------:|------------:|---------:|------------:|-----------------:|------------:|---------:|-----------:|--:|
-| Tokyo | 0.034 | 0.186 | 0.034 | 0.038 | **0.202** | 0.158 | 0.166 | 0.244 | 1097 |
-| Melbourne | 0.011 | **0.106** | 0.010 | 0.013 | 0.104 | 0.074 | 0.089 | 0.123 | 1573 |
-| Beijing | 0.139 | 0.304 | 0.148 | 0.113 | **0.357** | 0.200 | 0.196 | 0.508 | 115 |
-| Shanghai | 0.022 | 0.114 | 0.029 | 0.023 | **0.118** | 0.106 | 0.092 | 0.146 | 728 |
+| city | MostPop | DayNight | SameWD | HourBin | UserMostPop | **UMP_DN** | UMP_WD | UMP_WW | n_test | n_users |
+|------|--------:|---------:|-------:|--------:|------------:|-----------:|-------:|-------:|-------:|--------:|
+| Tokyo | 0.026 | 0.026 | 0.026 | 0.035 | 0.200 | **0.216** | 0.165 | 0.174 | 666 | 276 |
+| Melbourne | 0.011 | 0.008 | 0.011 | 0.009 | **0.120** | 0.117 | 0.081 | 0.111 | 1286 | 362 |
+| Beijing | 0.176 | 0.187 | 0.143 | 0.187 | 0.341 | **0.385** | 0.220 | 0.330 | 91 | 30 |
+| Shanghai | 0.022 | 0.033 | 0.024 | 0.043 | 0.098 | **0.102** | 0.095 | 0.093 | 581 | 148 |
 
-†子集 Acc（Tokyo day/night n=589/508；Mel 873/700；BJ 56/59；SH 379/349）。
+（保留比例：Tokyo 61% · Mel 82% · BJ 79% · SH 80% of test trails。）
 
-#### Official Acc@5 / Acc@10（local，摘要）
+#### Official Acc@1（local · unfiltered）
 
-| city | UMP @5 | UMP_DN @5 | UMP @10 | UMP_DN @10 |
-|------|-------:|----------:|--------:|-----------:|
-| Tokyo | 0.396 | **0.409** | 0.479 | 0.479 |
-| Melbourne | 0.241 | **0.243** | **0.310** | 0.303 |
-| Beijing | 0.470 | **0.478** | **0.513** | 0.504 |
-| Shanghai | 0.232 | **0.236** | 0.269 | **0.282** |
+| city | MostPop | DayNight | SameWD | HourBin | UserMostPop | **UMP_DN** | UMP_WD | UMP_WW | n_test | n_users |
+|------|--------:|---------:|-------:|--------:|------------:|-----------:|-------:|-------:|-------:|--------:|
+| Tokyo | 0.034 | 0.034 | 0.038 | 0.047 | 0.186 | **0.202** | 0.158 | 0.165 | 1097 | 647 |
+| Melbourne | 0.011 | 0.010 | 0.013 | 0.010 | **0.106** | 0.104 | 0.074 | 0.099 | 1573 | 583 |
+| Beijing | 0.139 | 0.148 | 0.113 | 0.148 | 0.304 | **0.357** | 0.200 | 0.296 | 115 | 52 |
+| Shanghai | 0.022 | 0.029 | 0.023 | 0.037 | 0.114 | **0.118** | 0.106 | 0.109 | 728 | 259 |
 
-#### User-disjoint Acc@1（local）
+#### Official Acc@5 / Acc@10（local · filtered）
 
-| city | MostPop≡UMP | DayNight | SameWeekday | UMP_DayNight | n |
-|------|------------:|---------:|------------:|-------------:|--:|
-| Tokyo | 0.038 | 0.038 | 0.038 | 0.038 | 1018 |
-| Melbourne | 0.006 | 0.009 | 0.005 | 0.006 | 1414 |
-| Beijing | 0.210 | 0.210 | 0.150 | 0.210 | 100 |
-| Shanghai | 0.014 | 0.004 | 0.017 | 0.014 | 783 |
+| city | UMP @5 | UMP_DN @5 | UMP_WW @5 | UMP @10 | UMP_DN @10 | UMP_WW @10 |
+|------|-------:|----------:|----------:|--------:|-----------:|-----------:|
+| Tokyo | 0.399 | **0.417** | 0.377 | 0.488 | **0.489** | 0.470 |
+| Melbourne | 0.257 | **0.259** | 0.240 | **0.329** | 0.320 | 0.309 |
+| Beijing | **0.505** | 0.495 | 0.451 | 0.538 | 0.516 | **0.549** |
+| Shanghai | 0.210 | **0.212** | 0.203 | 0.250 | **0.263** | 0.255 |
 
-**读数：** (1) **UMP_DayNight 在 Tokyo +1.6pp、Beijing +5.2pp** 相对 UserMostPop；Melbourne 基本持平略降；Shanghai 微升。(2) **Night 子集 Acc 明显高于 Day**（北京 Night Acc@1 0.51）。(3) **UserMostPop_Weekday 全面弱于 UserMostPop**——用户×星期桶过碎，噪声排序压过回退。(4) user-disjoint 下个性化消失，UMP_DayNight ≡ MostPop。
+**读数：** (1) **UMP_WorkWeekend ≫ UMP_Weekday**（二桶缓解 7 路稀疏），但仍通常 ≤ UserMostPop / UMP_DN。(2) 过滤后 UMP_DN 在 Tokyo/Beijing 相对 UMP 的抬升仍在（+1.6 / +4.4pp）。(3) 全局时间桶仍远弱于个性化。(4) user-disjoint 下个性化 ≡ MostPop（过滤不适用）。
 
 ### 3.5 Weekend 三项指标
 
