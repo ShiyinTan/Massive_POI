@@ -133,10 +133,36 @@ Massive-STEPS = 城市级、可复现的 **next-POI / semantic trajectory** 基�
 | **DayNightMostPop** | 按 **target hour** 的 Day/Night 二桶；空桶回退 MostPop |
 | **SameHourBinMostPop** | `hour_bin = hour // 4`（6 个 4h 箱；对照） |
 | **SameWeekdayHourMostPop** | `(weekday, hour_bin)` 联合桶 |
+| **UserMostPop_Day / _Night** | 该用户 train 中对应 Day/Night 桶内 MostPop；test 用 target **本地**时选桶；回退 UserMostPop → MostPop |
+| **UserMostPop_Weekday** | 同上，按 target weekday 选用户桶（7 路；易碎） |
+| **UserMostPop_WorkWeekend** | 用户×{Work=Mon–Fri, Weekend=Sat–Sun} 二桶；回退链同上（缓解 7 路稀疏） |
 
-**预测时刻（强制）：** 一律用 **target POI 的 check-in timestamp**（轨迹末事件时间），**不用** trail 首 timestamp。official 上约 **32–37%** trails 的 target 与 first 落在不同 Day/Night 桶（UTC-as-stored）；本地时下该不一致约 **25–38%**（见 [`data/utc_local_time_meta.csv`](data/utc_local_time_meta.csv) / [`data/event_time_meta.csv`](data/event_time_meta.csv)）。
+**协议（时间 / UserMostPop 桶基线，现行）：** 仅 **official** HF train/test；预测时刻 = **被预测那次 check-in 自己的 timestamp**（event time 已知；IANA 本地时）。next-POI trail 评测：target venue = 末站 `venue_id`，时间 = **同一末站** timestamp——不是 trail 首站时间。
 
-**Day/Night 切分：** **Day = hour ∈ [7, 19)，Night = 其余**（定义见 [`data/bin_definition.json`](data/bin_definition.json)）。
+**预测时刻（强制）：** 给定已知时间（及上下文），预测该 check-in 落在哪个 POI。trail 上即末站的 venue + **末站自己的** timestamp。official 上约 **32–37%** trails 的 target 与 first 落在不同 Day/Night 桶（UTC-as-stored）；本地时下约 **25–38%**（见 [`data/utc_local_time_meta.csv`](data/utc_local_time_meta.csv) / [`data/event_time_meta.csv`](data/event_time_meta.csv)）。
+
+**Day/Night 切分：** **Day = hour ∈ [7, 19)，Night = 其余**（定义见 [`data/bin_definition.json`](data/bin_definition.json)）。  
+**时区偏好（现行）：** 新基线与行为读数默认 **城市本地 IANA**（Tokyo `Asia/Tokyo` · Melbourne `Australia/Melbourne` · Beijing/Shanghai `Asia/Shanghai`）；UTC-as-stored 仅作历史对照。
+
+#### 时间桶实现（伪代码；prediction time = 被预测 check-in 的 timestamp）
+
+```
+# timestamp: HF naive → treat as UTC, then tz_convert(city_IANA) for local_*
+# Day = hour ∈ [7,19); hour_bin = hour // 4; weekday = Mon=0..Sun=6
+# split = official only
+
+fit SameWeekday / SameHourBin / SameWeekdayHour / DayNight:
+  for each train check-in c:
+    key = weekday(c) | hour_bin(c) | (weekday, hour_bin) | daynight(c)
+    bucket[key][c.venue] += 1
+  global = MostPop(train)
+
+predict(trail):
+  # target = last check-in; time features from THAT check-in's timestamp
+  t = trail.last_checkin          # NEVER trail.first
+  key = f(t.local_*)              # prefer local going forward
+  return merge(bucket[key], global)   # empty bucket → global
+```
 
 ### 3.2 官方 split 非时间基线 [measured]
 
@@ -213,18 +239,64 @@ IANA 与桶定义：[`data/bin_definition.json`](data/bin_definition.json) · �
 1. **Hour / hour_bin 几乎总是错位**（偏移 8–11h），但 **SameHourBin Acc@1 多数城几乎不变**——桶内流行度排序对整体平移有一定鲁棒性；Tokyo/Mel @5/@10 本地时略升。  
 2. **DayNight 二桶在 UTC 下常 ≈ MostPop**；改成本地时后 Tokyo/Shanghai @5/@10、Beijing Acc@1 有小幅改善（日间窗对准真实通勤/活动）。  
 3. **SameWeekday**：Beijing Acc@1 从 0.087→0.113（+2.6pp）——跨日界造成的 weekday 错桶最伤小样本城。  
-4. **结论不变：** 时间仍是弱全局先验，**SameHourBin 仍是最强廉价时间桶**；解释行为节律请用 **local**，复现旧表请用 **UTC-as-stored**。
+4. **结论不变：** 时间仍是弱全局先验，**SameHourBin 仍是最强廉价时间桶**；解释行为节律请用 **local**，复现旧表请用 **UTC-as-stored**。本专题时间桶表 **仅报 official**。
 
-**User-disjoint Acc@1（摘要，UTC / local）**
+### 3.4 时间 / 个性化基线总表 + 长尾过滤 [measured · official · local]
 
-| city | MostPop | SW u/l | DN u/l | HB u/l | n_test |
-|------|--------:|-------:|-------:|-------:|-------:|
-| Tokyo | 0.038 | 0.038 / 0.038 | 0.038 / 0.038 | **0.064 / 0.058** | 1018 |
-| Melbourne | 0.006 | 0.006 / 0.005 | 0.006 / 0.009 | **0.010 / 0.009** | 1414 |
-| Beijing | 0.210 | 0.150 / 0.150 | 0.210 / 0.210 | **0.260 / 0.260** | 100 |
-| Shanghai | 0.014 | **0.017 / 0.017** | 0.014 / 0.004 | 0.008 / 0.008 | 783 |
+**定义（伪代码；prediction time = 被预测 check-in 的 local timestamp）：**
 
-### 3.4 Weekend 三项指标
+```
+# Work = weekday∈{Mon..Fri}; Weekend = {Sat,Sun}; split = official only
+fit UserMostPop_*:
+  user_bin[u][bin(c.local_*)][v] += 1;  user_global[u][v] += 1
+predict:  # t = check-in being predicted (= trail last); time = t.timestamp
+  merge(user_bin[u][bin(t)], user_global[u], MostPop)
+# bin ∈ {daynight, weekday, workweekend}
+```
+
+**长尾过滤（个性化 / 时段桶评测）：** 仅保留 train 上满足  
+**≥5 check-ins** 且 **day≥2 & night≥2** 且 **work≥2 & weekend≥2**（本地时）的用户的 test trails。  
+元数据：[`data/longtail_filter_meta.csv`](data/longtail_filter_meta.csv) · 定义：[`data/bin_definition.json`](data/bin_definition.json)。  
+**主表 = filtered**；unfiltered 对照同文件族。
+
+CSV：[`data/acc1_full_comparison_official_local.csv`](data/acc1_full_comparison_official_local.csv) · [`acc5_…`](data/acc5_full_comparison_official_local.csv) · [`acc10_…`](data/acc10_full_comparison_official_local.csv) · unfiltered：`acc*_comparison_unfiltered_official_local.csv` · 长表：[`data/usermostpop_time_bins.csv`](data/usermostpop_time_bins.csv)
+
+![Full comparison Acc@1](figures/full_comparison_acc1_official_local.png)
+
+**图注：** 官方·本地时八模型 Acc@1；左 filtered（主表）、右 unfiltered。UMP_DN 仍最强个性化；UMP_WorkWeekend systematically 优于稀疏的 UMP_Weekday，但通常仍低于 UserMostPop / UMP_DN。
+
+#### Official Acc@1（local · **filtered** · primary）
+
+| city | MostPop | DayNight | SameWD | HourBin | UserMostPop | **UMP_DN** | UMP_WD | UMP_WW | n_test | n_users |
+|------|--------:|---------:|-------:|--------:|------------:|-----------:|-------:|-------:|-------:|--------:|
+| Tokyo | 0.026 | 0.026 | 0.026 | 0.035 | 0.200 | **0.216** | 0.165 | 0.174 | 666 | 276 |
+| Melbourne | 0.011 | 0.008 | 0.011 | 0.009 | **0.120** | 0.117 | 0.081 | 0.111 | 1286 | 362 |
+| Beijing | 0.176 | 0.187 | 0.143 | 0.187 | 0.341 | **0.385** | 0.220 | 0.330 | 91 | 30 |
+| Shanghai | 0.022 | 0.033 | 0.024 | 0.043 | 0.098 | **0.102** | 0.095 | 0.093 | 581 | 148 |
+
+（保留比例：Tokyo 61% · Mel 82% · BJ 79% · SH 80% of test trails。）
+
+#### Official Acc@1（local · unfiltered）
+
+| city | MostPop | DayNight | SameWD | HourBin | UserMostPop | **UMP_DN** | UMP_WD | UMP_WW | n_test | n_users |
+|------|--------:|---------:|-------:|--------:|------------:|-----------:|-------:|-------:|-------:|--------:|
+| Tokyo | 0.034 | 0.034 | 0.038 | 0.047 | 0.186 | **0.202** | 0.158 | 0.165 | 1097 | 647 |
+| Melbourne | 0.011 | 0.010 | 0.013 | 0.010 | **0.106** | 0.104 | 0.074 | 0.099 | 1573 | 583 |
+| Beijing | 0.139 | 0.148 | 0.113 | 0.148 | 0.304 | **0.357** | 0.200 | 0.296 | 115 | 52 |
+| Shanghai | 0.022 | 0.029 | 0.023 | 0.037 | 0.114 | **0.118** | 0.106 | 0.109 | 728 | 259 |
+
+#### Official Acc@5 / Acc@10（local · filtered）
+
+| city | UMP @5 | UMP_DN @5 | UMP_WW @5 | UMP @10 | UMP_DN @10 | UMP_WW @10 |
+|------|-------:|----------:|----------:|--------:|-----------:|-----------:|
+| Tokyo | 0.399 | **0.417** | 0.377 | 0.488 | **0.489** | 0.470 |
+| Melbourne | 0.257 | **0.259** | 0.240 | **0.329** | 0.320 | 0.309 |
+| Beijing | **0.505** | 0.495 | 0.451 | 0.538 | 0.516 | **0.549** |
+| Shanghai | 0.210 | **0.212** | 0.203 | 0.250 | **0.263** | 0.255 |
+
+**读数：** (1) **UMP_WorkWeekend ≫ UMP_Weekday**（二桶缓解 7 路稀疏），但仍通常 ≤ UserMostPop / UMP_DN。(2) 过滤后 UMP_DN 在 Tokyo/Beijing 相对 UMP 的抬升仍在（+1.6 / +4.4pp）。(3) 全局时间桶仍远弱于个性化。
+
+### 3.5 Weekend 三项指标
 
 论文任务：末次 check-in 是否周末（`dow ≥ 5`）。**历史数字按 UTC-as-stored weekday**；本地时会改变贴近日界的标签，完整重算留待后续（本 lean 更新聚焦时间条件 MostPop）。
 
@@ -353,8 +425,9 @@ IANA 与桶定义：[`data/bin_definition.json`](data/bin_definition.json) · �
 7. **跨城 category/text 迁移**：leave-one-city-out。  
 8. **Weekend lift 协议**：相对 majority；难例子=末类别规则错。  
 9. **Hub-aware 图先验**：用 OD/转移强度正则化。  
-10. **时间戳本地时**：时间特征与 DayNight/HourBin 报告 **UTC-as-stored 与 IANA local 双栏**；行为解释以 local 为准。  
-11. **廉价基线决策卡**：由数据特征预测该用哪条基线、深度模型最小有意义增益。
+10. **时间戳本地时**：新基线默认 **IANA local**；UTC-as-stored 仅作历史对照。  
+11. **个性化×时段**：UserMostPop_DayNight 已抬升多城 Acc@1；探索更细 hour-bin 用户桶 vs 过碎 weekday。  
+12. **廉价基线决策卡**：由数据特征预测该用哪条基线、深度模型最小有意义增益。
 
 ---
 
@@ -366,6 +439,6 @@ IANA 与桶定义：[`data/bin_definition.json`](data/bin_definition.json) · �
 | [`README.md`](README.md) | 目录索引 |
 | [`massive-steps-cited-city-table.csv`](massive-steps-cited-city-table.csv) | 15 城规模表 |
 | [`massive-steps-measured-summary.csv`](massive-steps-measured-summary.csv) | 10 城实测分布摘要 |
-| [`figures/`](figures/) | 规模/分布、UTC–local 时段、证据、基线、切分、时长图 |
-| [`data/`](data/) | 研究/基线/切分/时间条件（含 utc_local_*）CSV |
+| [`figures/`](figures/) | 规模/分布、UTC–local 时段、证据、基线、UMP 时段、切分、时长图 |
+| [`data/`](data/) | 研究/基线/切分/时间条件（含 `utc_local_*`、`usermostpop_time_bins*`）CSV |
 | [`maps/`](maps/) | 极简灰底气泡与流向图 + OD/格子 CSV |
