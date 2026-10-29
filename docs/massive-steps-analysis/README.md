@@ -6,7 +6,7 @@
 
 **主报告（中文）：** [massive-steps-analysis.md](massive-steps-analysis.md)
 
-覆盖：数据集概览 / 字段 / 分布、**图轴术语表**、研究角度与廉价基线（含 **UTC-as-stored vs 城市本地时**、**UserMostPop_DayNight / Weekday / WorkWeekend**、长尾用户过滤与八模型 Acc 总表）、切分稳定性、周末指标、轨迹时间跨度、极简灰底地图、优先课题；关键图附 2–4 句图注。
+覆盖：数据集概览 / 字段 / 分布、**图轴术语表**、研究角度与廉价基线（含 **UTC-as-stored vs 城市本地时**、**UserMostPop_DayNight / Weekday / WorkWeekend**、长尾用户过滤与八模型 Acc 总表；时间桶 **official split only**，预测时刻 = 被预测 check-in 的 timestamp）、切分稳定性、周末指标、轨迹时间跨度、极简灰底地图、优先课题；关键图附 2–4 句图注。
 
 ## 目录
 

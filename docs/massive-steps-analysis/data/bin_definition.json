@@ -9,7 +9,7 @@
   "DayNightMostPop": "Day = hour in [7, 19); Night = otherwise",
   "SameHourBinMostPop": "hour_bin = hour // 4 (6 bins)",
   "SameWeekdayMostPop": "weekday = Mon..Sun from target timestamp",
-  "prediction_time": "target (last) check-in timestamp on the trail; never trail start",
+  "prediction_time": "timestamp of the check-in being predicted (event time known). On next-POI trail eval: target venue = last check-in's venue_id; prediction time = that same last check-in's timestamp (city IANA local). Never use the trail's first check-in time.",
   "SameWeekdayHourMostPop": "(weekday, hour_bin) joint bucket",
   "preferred_timezone": "city local IANA going forward",
   "UserMostPop_Day": "Per-user MostPop over that user's train check-ins with local hour in [7,19); at test, use target check-in local daynight==day. Fallback: user global UserMostPop, then global MostPop.",
@@ -24,5 +24,6 @@
     "requirements": ">= 5 train check-ins AND >= 2 in each of {day, night} AND >= 2 in each of {work, weekend} (local time bins on train)",
     "primary_table": "filtered",
     "also_report": "unfiltered"
-  }
+  },
+  "eval_split": "official HF train/test only (user-disjoint removed from this protocol)"
 }
