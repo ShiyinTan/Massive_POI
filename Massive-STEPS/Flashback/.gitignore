@@ -1,0 +1,7 @@
+
+__pycache__/
+
+# ommit datasets
+data/*.txt
+data
+logs/
