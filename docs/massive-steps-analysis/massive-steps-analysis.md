@@ -1,52 +1,51 @@
-# Massive-STEPS 分析报告
+# Massive-STEPS 分析报告（全量 HF · 15 城）
 
 **来源：** [Massive-STEPS](https://github.com/cruiseresearchgroup/Massive-STEPS) · [arXiv:2505.11239](https://arxiv.org/abs/2505.11239) · [HF collection](https://huggingface.co/collections/CRUISEResearchGroup/massive-steps-point-of-interest-check-in-dataset-682716f625d74c2569bc7a73)  
-**评测城（研究/基线/地图）：** Tokyo · Melbourne · Beijing · Shanghai  
-**证据：** **[cited]** 论文/README · **[measured]** 本机对 HF check-in CSV 计算
+**评测城（全量）：** Tokyo · Melbourne · Beijing · Shanghai · Sydney · Palembang · Moscow · New-York · Sao-Paulo · Bandung · Istanbul · Jakarta · Kuwait-City · Petaling-Jaya · Tangerang  
+**证据：** **[cited]** 论文/README · **[measured]** 本机对 **完整** HF check-in CSV 计算（无 row/city subsample；个性化时段表另有文档化长尾用户过滤）  
+**协议：** **official split only**；prediction time = **被预测 check-in 的 IANA 本地时**；主表不含 user-disjoint。
 
 本目录为 Massive_POI 侧的精简交付：一份总报告 + 必要图与 CSV。
+
+**全量 HF 校验：** `covers_full_csv=True` 对全部 15 城成立（`train+val+test` 行数 = `*_checkins.csv`）。Provenance：[`data/hf_download_provenance.csv`](data/hf_download_provenance.csv)。合计实测 check-ins ≈ **2,629,541**。
 
 ---
 
 ## 图轴 / 标签术语表（中文）
-
-读图前先对一下轴含义（保留图中英文轴标签，释义如下）：
 
 | 图中标签 | 中文释义 |
 |----------|----------|
 | **category entropy (nats)** | 类别分布的香农熵（Shannon entropy），单位 **nat**（自然对数 \(\ln\)，非 bit） |
 | **Gini** / **poi_gini** | POI 流行度的基尼系数：越接近 1 表示 check-in 越集中在少数热门 POI |
 | **Share of check-ins** | 该小时（或该档）check-in 占总 check-in 的比例 |
-| **Hour of day** | 一天中的小时 \(0\ldots23\)；须注明是 **UTC-as-stored** 还是 **城市本地时** |
+| **Hour of day** | 一天中的小时 \(0\ldots23\)；本报告时间桶默认 **城市本地时**（IANA） |
 | **Acc@k** | 真实目标 POI 落在模型 Top-\(k\) 预测中的比例（全城候选） |
 | **trail span / duration (h)** | 轨迹时间跨度 \(=\text{末 timestamp}-\text{首 timestamp}\)（小时）；≠ STD 的相邻间隔 δτ=8h |
 | **Relative flow %** | 某条 OD 边流量占该城全部相邻转移次数的百分比（流向图线宽/颜色） |
-| **same-cat transition** | 相邻两次 check-in **共享同一 `venue_category`**；报告的 rate = 同类内转移（OD 边 / transition）占比 |
+| **same-cat transition** | 相邻两次 check-in **共享同一 `venue_category`**；rate = 同类内转移占比 |
 | **ctx_len** | 预测时可用的上下文长度（末站之前的 check-in 数）；官方 test 上 ctx_len=1 常占多数 |
-| **Desire line / OD** | 起讫期望线：同 `trail_id` 相邻 check-in 连成的流量边（不考虑真实路网） |
+| **Desire line / OD** | 起讫期望线：同 `trail_id` 相邻 check-in 连成的流量边 |
 
 ---
 
 ## 1. 数据集概览
 
-### 1.1 定位与覆盖 [cited]
+### 1.1 定位与覆盖 [cited + measured]
 
-Massive-STEPS = 城市级、可复现的 **next-POI / semantic trajectory** 基准，主任务含监督推荐、零样本 LLM 推荐、以及轨迹末 check-in 是否落在周末的时空分类。
+Massive-STEPS = 城市级、可复现的 **next-POI / semantic trajectory** 基准。
 
 - **15 城 / 10 国**；STD 两段约 **24 个月**（2012–2013、2017–2018，非连续）
 - 轨迹：同用户相邻 check-in 间隔 ≤ **δτ = 8h** 归入同一 trail
-- 全库约：**80,299 users** · **950,809 trails** · **386,007 POIs**（城内独立编号）· **2,629,541 check-ins**
 - 切分：**trail 级 7:1:2**，并对 `user_id` stratify（同用户可跨 train/test）
+- 本报告实测：**完整 HF 15 城 CSV**（见 provenance）
 
-规模表：[`massive-steps-cited-city-table.csv`](massive-steps-cited-city-table.csv)
+规模表：[`massive-steps-cited-city-table.csv`](massive-steps-cited-city-table.csv) · 分布摘要：[`massive-steps-measured-summary.csv`](massive-steps-measured-summary.csv)
 
 ![City scale](figures/city-scale-cited.png)
 
-**图注：** 十五城用户 / 轨迹 / POI / check-in 规模对照。Istanbul、Petaling Jaya、Jakarta 等为百万级 check-in，而 Beijing / Shanghai / Tokyo 子集显著更小——跨城对比必须归一化或分层，不能直接比绝对 Acc。该图支撑「地理多样性 + 规模不均」是 Massive-STEPS 作为基准的核心卖点，也提示小样本城（如 Beijing）方差更大。
+**图注：** 十五城 check-in 规模对照（完整 HF）。Istanbul / Petaling Jaya / Jakarta 等为数十万级，而 Beijing / Shanghai / Tokyo 子集显著更小——跨城对比必须归一化或分层，不能直接比绝对 Acc。
 
 ### 1.2 字段 [cited]
-
-结构化主表（HF `{city}_checkins*.csv`）核心字段：
 
 | 字段 | 含义 |
 |------|------|
@@ -54,237 +53,150 @@ Massive-STEPS = 城市级、可复现的 **next-POI / semantic trajectory** 基�
 | `latitude` / `longitude` | venue 坐标；隐私缺失时为空 |
 | `name` / `address` / `venue_category` | 语义元数据 |
 | `venue_city_*` | 行政地名与中心坐标（**无 venue 坐标时的空间 fallback**） |
-| `timestamp` | check-in 时间（**去 timezone offset 的 naive datetime**） |
+| `timestamp` | check-in 时间（**去 timezone offset 的 naive datetime**；本地时 = 当作 UTC 再 `tz_convert(IANA)`） |
 
-论文将监督特征归纳为：**social · spatial · temporal · categorical**。`venue_id` **不可跨城**直接联合。
+IANA 映射见 [`data/bin_definition.json`](data/bin_definition.json)。
 
-**Timestamp 约定（实测确认）：** HF / Massive-STEPS 写出的 `timestamp` **无 `+00:00` / `Z` 后缀**（offset 被剥掉）。字段值与按 **UTC** 解读再转到城市本地时后的钟点一致地对不齐——四城 **100%** check-in 的 hour 在「naive 直读」与「IANA 本地」之间不同。本报告时间桶基线因此 **并列报告两种模式**（§3.3）。
+### 1.3 分布画像 [measured · full HF]
 
-### 1.3 分布画像 [measured + cited]
-
-**实测 10 城**（含上表四城 + Palembang / Sydney / Tangerang / Bandung / Moscow / New York）：[`massive-steps-measured-summary.csv`](massive-steps-measured-summary.csv)
-
-| 现象 | 要点 |
-|------|------|
-| 极短轨迹 | μ_len ≈ 2.5–3.1；length≤3 约占 **77–89%** |
-| 用户长尾 | users≤5 trails：Tokyo ~0.60，Beijing ~0.52 |
-| POI 长尾 | once-only ~44–59%；top10% POI 可占半数以上 check-ins |
-| 坐标缺失 | 论文约 **13.25%**；实测 Tokyo ~3% → Palembang/Tangerang ~28–30% |
-| 年代偏斜 | Tokyo 几乎全是 2018；Bandung/Moscow/Beijing 几乎全是 2013 |
-| same-cat 转移 | test 上同类转移仅约 **5–15%**（Tokyo ~0.15；Mel/BJ/SH ~0.05–0.06） |
+| city | users | trails | POIs | check-ins | μ_len | ≤3 frac | POI once | Gini | miss-coord |
+|------|------:|-------:|-----:|----------:|------:|--------:|---------:|-----:|-----------:|
+| Tokyo | 764 | 5482 | 2982 | 13839 | 2.52 | 0.89 | 0.50 | 0.67 | 0.03 |
+| Melbourne | 646 | 7864 | 6901 | 22050 | 2.80 | 0.82 | 0.54 | 0.56 | 0.05 |
+| Beijing | 56 | 573 | 598 | 1470 | 2.57 | 0.89 | 0.59 | 0.48 | 0.07 |
+| Shanghai | 296 | 3636 | 3610 | 10491 | 2.89 | 0.78 | 0.58 | 0.55 | 0.07 |
+| Sydney | 740 | 10148 | 8189 | 29900 | 2.95 | 0.79 | 0.55 | 0.61 | 0.08 |
+| Palembang | 267 | 4699 | 4117 | 14467 | 3.08 | 0.77 | 0.55 | 0.60 | 0.29 |
+| Moscow | 3993 | 39485 | 13994 | 105620 | 2.67 | 0.85 | 0.44 | 0.74 | 0.15 |
+| New-York | 6929 | 92041 | 45804 | 272368 | 2.96 | 0.80 | 0.44 | 0.68 | 0.07 |
+| Sao-Paulo | 5822 | 89689 | 34881 | 256824 | 2.86 | 0.82 | 0.43 | 0.73 | 0.07 |
+| Bandung | 3377 | 55333 | 26559 | 161284 | 2.91 | 0.81 | 0.50 | 0.73 | 0.24 |
+| Istanbul | 23700 | 216411 | 42795 | 544471 | 2.52 | 0.89 | 0.44 | 0.83 | 0.12 |
+| Jakarta | 8336 | 137396 | 71150 | 412100 | 3.00 | 0.80 | 0.51 | 0.72 | 0.19 |
+| Kuwait-City | 9628 | 91658 | 13455 | 232706 | 2.54 | 0.88 | 0.42 | 0.87 | 0.13 |
+| Petaling-Jaya | 14308 | 180410 | 53650 | 506430 | 2.81 | 0.83 | 0.44 | 0.79 | 0.12 |
+| Tangerang | 1437 | 15984 | 9975 | 45521 | 2.85 | 0.83 | 0.51 | 0.66 | 0.28 |
 
 ![Trail lengths](figures/trail-length-measured.png)
 
-**图注：** 各城轨迹长度直方图（或密度）。绝大多数 trails 只有 2–3 次 check-in，长序列稀有。说明 next-POI 评测的「上下文」常常只是 **单步**，序列模型的优势需要与非序列先验（用户习惯、一跳转移、流行度）严格对照。
+**图注：** 各城 length≤3 轨迹占比。绝大多数 trails 只有 2–3 次 check-in；next-POI「上下文」常常只是单步。
 
 ![POI long-tail](figures/poi-long-tail-measured.png)
 
-**图注：** POI 流行度长尾——大量 POI 仅出现一次，头部 POI 占走大部分 check-in（高 Gini）。大词表 + 稀疏标签使全局 MostPop 很弱，也驱动 unseen-target / 开放词表推荐问题。
+**图注：** POI once-only 比例与 Gini。大词表 + 稀疏标签使全局 MostPop 很弱，并驱动 unseen-target 问题。
 
-![Hour of day UTC vs local](figures/hour-of-day-utc-vs-local.png)
+![Hour of day local](figures/hour-of-day-utc-vs-local.png)
 
-**图注：** 左：把 naive `timestamp` **当作 UTC / 原样取 hour**；右：经 IANA 转到城市本地时（Tokyo→`Asia/Tokyo`，Melbourne→`Australia/Melbourne`，Beijing/Shanghai→`Asia/Shanghai`）。UTC 视图下各城峰相位错开；本地时后四城对齐出共同的日节律（凌晨低谷、日间/晚间峰）。旧版单图轴上的 “local timestamp as stored” 易误解——存储值更接近 **剥掉 offset 的 UTC**。时间特征与 SameHourBin 等基线必须以本地时为准做行为解释，同时保留 UTC-as-stored 对照以免与历史数字对不上。
+**图注：** 核心四城按 **城市本地时** 的 hour-of-day 份额。行为节律解释一律用 local。
 
 ![Entropy vs short trails](figures/entropy-vs-short-trails.png)
 
-**图注：** 横轴 **category entropy (nats)** = 类别分布香农熵；纵轴为 length≤3 的轨迹占比；气泡大小反映规模。类别更均匀（高熵）的城往往短轨迹略少；Beijing/Tokyo 低熵 + 极短轨迹扎堆。该图连接「城市难度」与「短上下文」两条主线，呼应论文熵–Acc 负相关。
-
-**复用注意：** 短上下文、大稀疏候选、缺失坐标 fallback、非全局 POI ID、非 user-disjoint 官方切分、动态 POI 过期风险、**时间戳 timezone 语义**。完整训练数据在 HF，不在 GitHub `data/`。
+**图注：** 横轴 category entropy (nats)，纵轴 length≤3 占比，气泡∝规模。连接「城市难度」与「短上下文」。
 
 ---
 
-## 2. 研究角度（四城证据）
+## 2. 研究角度（全城证据）
 
 完整数值：[`data/research-evidence.csv`](data/research-evidence.csv)
 
 ![证据快照](figures/research_evidence_snapshot.png)
 
-**图注：** 四城关键证据条（短轨迹占比、cold/warm、未见目标、坐标缺失、same-cat 转移等）一屏对照。用来快速判断「该城更该打个性化、空间还是语义牌」，避免只看单一 Acc@1。
+**图注：** 核心四城关键证据条一屏对照（短轨迹、ctx=1、未见目标、same-cat、缺坐标）。
+
+| city | ctx=1 | unseen tgt | same-cat | cold≤3 | 2013 frac | 2018 frac |
+|------|------:|-----------:|---------:|-------:|----------:|----------:|
+| Tokyo | 0.69 | 0.13 | 0.15 | 0.29 | 0.00 | 1.00 |
+| Melbourne | 0.60 | 0.21 | 0.06 | 0.12 | 0.84 | 0.16 |
+| Beijing | 0.66 | 0.23 | 0.05 | 0.17 | 0.98 | 0.02 |
+| Shanghai | 0.55 | 0.27 | 0.06 | 0.13 | 0.87 | 0.13 |
+| Sydney | 0.59 | 0.18 | 0.06 | 0.12 | 0.83 | 0.17 |
+| Palembang | 0.56 | 0.18 | 0.06 | 0.04 | 0.99 | 0.01 |
+| Moscow | 0.65 | 0.08 | 0.07 | 0.19 | 0.98 | 0.02 |
+| New-York | 0.59 | 0.09 | 0.06 | 0.11 | 0.86 | 0.14 |
+| Sao-Paulo | 0.61 | 0.08 | 0.06 | 0.07 | 0.93 | 0.07 |
+| Bandung | 0.59 | 0.10 | 0.06 | 0.05 | 0.99 | 0.01 |
+| Istanbul | 0.69 | 0.05 | 0.07 | 0.18 | 0.74 | 0.26 |
+| Jakarta | 0.58 | 0.11 | 0.07 | 0.05 | 0.99 | 0.01 |
+| Kuwait-City | 0.69 | 0.03 | 0.08 | 0.17 | 0.18 | 0.82 |
+| Petaling-Jaya | 0.61 | 0.06 | 0.06 | 0.14 | 0.81 | 0.19 |
+| Tangerang | 0.64 | 0.13 | 0.09 | 0.13 | 1.00 | 0.00 |
 
 | 角度 | 实测要点 | 开放问题 |
 |------|----------|----------|
-| 短上下文 | test 中 ctx_len=1 约占 **55–69%** | 单步专用先验 vs 深序列模型；分层报长轨迹 |
-| Cold-start | Markov Acc@1：cold≪warm（Beijing 0.11→0.31） | user-disjoint 下 SOTA 掉多少？跨城 meta |
-| 未见目标 | test unseen target **13–27%** | 开放词表 / name·category·坐标生成式推荐 |
-| 坐标缺失 | OD 边至少一端缺精确坐标 **5–14%**（本四城） | mask/分层；避免 admin centroid 伪邻近 |
-| same-cat 转移 | 仅 **~5–15%** 相邻转移同类 | 纯类别马尔可夫上限有限；需空间/个性化 |
-| 2013↔2018 | Tokyo 无 2013；Mel/SH 类别 L1 漂移大 | period-conditioned 指标；开闭店 |
-| 跨城 | 类别 Jaccard 0.30–0.65；ID 无重叠 | category+text+相对空间 zero-shot |
-| 语义 vs 空间 | Nearest Acc@1≈0；Markov1 明显更强 | 先区域后语义两阶段 |
-| Weekend 分类 | 偏斜城上 majority 已 ~0.68–0.70 | 必报相对 majority 的 **lift** |
-| 个性化泄漏 | **UserMostPop** 官方 split 上四城 Acc@1 全胜简单基线 | 并行报 official / user-disjoint / time-based |
+| 短上下文 | 多数城 test ctx_len=1 过半 | 单步先验 vs 深序列；分层报长轨迹 |
+| Cold-start | cold 用户占比高；个性化历史量是主难度轴 | 跨城 meta；user-disjoint 仅作诊断勿作主表 |
+| 未见目标 | unseen target 常见两位数 % | 开放词表 / name·category·坐标 |
+| 坐标缺失 | 城间差异大（Tokyo ~3% → Palembang ~29%） | mask/分层；避免 admin centroid 伪邻近 |
+| same-cat 转移 | 多数城仅个位数–低两位数 % | 纯 CatMarkov 上限有限 |
+| 2013↔2018 | Tokyo 几乎全 2018；多城偏 2013 | period-conditioned；开闭店 |
+| 个性化泄漏 | **UserMostPop / UMP_DN** 在 official 上全面领先廉价全局先验 | 新方法必须超 UMP 族，而不只超 MostPop |
 
 ---
 
-## 3. 廉价基线定义与结果
+## 3. 廉价基线（official · local）
 
-任务：给定上下文 \(c_1,\ldots,c_{L-1}\)，预测末站 `venue_id`；候选=全城 POI；报 Acc@1/5/10。缺失坐标用 `venue_city_*`。
+任务：给定上下文 \(c_1,\ldots,c_{L-1}\) 与 **已知 target 时刻**，预测末站 `venue_id`；候选=全城 POI；报 Acc@1/5/10。
 
 ### 3.1 定义摘要
 
 | 模型 | 核心 |
 |------|------|
-| **MostPop** | 全局 venue 频次排序 |
-| **UserMostPop** | 用户历史频次；不足回退 MostPop（user-disjoint 下 ≡ MostPop） |
-| **Markov1** | 一阶 POI→POI 转移（看当前站）；不足回退 MostPop |
-| **Nearest** | 相对当前站 Haversine 最近其他 POI |
-| **CatMarkov** | 类别一阶转移 → 类内 MostPop 消歧 |
-| **SameWeekdayMostPop** | 按 **target（末站）** weekday 桶频次；空桶回退 MostPop |
-| **DayNightMostPop** | 按 **target hour** 的 Day/Night 二桶；空桶回退 MostPop |
-| **SameHourBinMostPop** | `hour_bin = hour // 4`（6 个 4h 箱；对照） |
-| **SameWeekdayHourMostPop** | `(weekday, hour_bin)` 联合桶 |
-| **UserMostPop_Day / _Night** | 该用户 train 中对应 Day/Night 桶内 MostPop；test 用 target **本地**时选桶；回退 UserMostPop → MostPop |
-| **UserMostPop_Weekday** | 同上，按 target weekday 选用户桶（7 路；易碎） |
-| **UserMostPop_WorkWeekend** | 用户×{Work=Mon–Fri, Weekend=Sat–Sun} 二桶；回退链同上（缓解 7 路稀疏） |
+| **MostPop** | 全局 venue 频次 |
+| **Nearest** | 相对当前站 Haversine/近似最近其他 POI（缺坐标 → `venue_city_*`） |
+| **Markov1** | 一阶 POI→POI；不足回退 MostPop |
+| **CatMarkov** | 类别一阶转移 → 类内 MostPop |
+| **DayNight / SameWD / HourBin / WorkWeekend** | 按 **target local** 时刻分桶的全局 MostPop |
+| **UserMostPop** | 用户历史频次；不足回退 MostPop |
+| **UMP_DayNight / UMP_Weekday / UMP_WorkWeekend** | 用户×时段桶；回退用户全局 → MostPop |
 
-**协议（时间 / UserMostPop 桶基线，现行）：** 仅 **official** HF train/test；预测时刻 = **被预测那次 check-in 自己的 timestamp**（event time 已知；IANA 本地时）。next-POI trail 评测：target venue = 末站 `venue_id`，时间 = **同一末站** timestamp——不是 trail 首站时间。
+**预测时刻（强制）：** 被预测那次 check-in **自己的** timestamp（trail 上 = 末站同一时刻），**从不**用 trail 首站时间。  
+**Day/Night：** Day = hour ∈ **[7, 19)**。  
+**长尾过滤（UMP 主表）：** train 上 ≥5 check-ins 且 day/night/work/weekend 各 ≥2（local）。元数据：[`data/longtail_filter_meta.csv`](data/longtail_filter_meta.csv)。
 
-**预测时刻（强制）：** 给定已知时间（及上下文），预测该 check-in 落在哪个 POI。trail 上即末站的 venue + **末站自己的** timestamp。official 上约 **32–37%** trails 的 target 与 first 落在不同 Day/Night 桶（UTC-as-stored）；本地时下约 **25–38%**（见 [`data/utc_local_time_meta.csv`](data/utc_local_time_meta.csv) / [`data/event_time_meta.csv`](data/event_time_meta.csv)）。
-
-**Day/Night 切分：** **Day = hour ∈ [7, 19)，Night = 其余**（定义见 [`data/bin_definition.json`](data/bin_definition.json)）。  
-**时区偏好（现行）：** 新基线与行为读数默认 **城市本地 IANA**（Tokyo `Asia/Tokyo` · Melbourne `Australia/Melbourne` · Beijing/Shanghai `Asia/Shanghai`）；UTC-as-stored 仅作历史对照。
-
-#### 时间桶实现（伪代码；prediction time = 被预测 check-in 的 timestamp）
+#### 伪代码
 
 ```
-# timestamp: HF naive → treat as UTC, then tz_convert(city_IANA) for local_*
-# Day = hour ∈ [7,19); hour_bin = hour // 4; weekday = Mon=0..Sun=6
-# split = official only
-
-fit SameWeekday / SameHourBin / SameWeekdayHour / DayNight:
-  for each train check-in c:
-    key = weekday(c) | hour_bin(c) | (weekday, hour_bin) | daynight(c)
-    bucket[key][c.venue] += 1
-  global = MostPop(train)
-
+# local_* from target check-in timestamp (IANA); split = official only
+fit global / user / user×bin on train check-ins
 predict(trail):
-  # target = last check-in; time features from THAT check-in's timestamp
   t = trail.last_checkin          # NEVER trail.first
-  key = f(t.local_*)              # prefer local going forward
-  return merge(bucket[key], global)   # empty bucket → global
+  return merge(user_bin[u][bin(t)], user_global[u], MostPop)  # or global bin / Markov / Nearest
 ```
 
-### 3.2 官方 split 非时间基线 [measured]
+### 3.2 Official Acc@1（local · **unfiltered** · 全局/转移/空间主表）
 
-![基线总览](figures/baselines_acc_overview.png)
+CSV：[`data/acc1_comparison_unfiltered_official_local.csv`](data/acc1_comparison_unfiltered_official_local.csv) · 长表：[`data/research-baselines.csv`](data/research-baselines.csv)
 
-**图注：** 四城 MostPop / UserMostPop / Markov1 / Nearest 等 Acc@k 总览。UserMostPop 在官方切分上全面领先，说明同用户跨 split 把回头客习惯算进可预测性；新方法必须超越 UserMostPop/Markov，而不是只超 MostPop。
+| city | MostPop | Nearest | Markov1 | CatMarkov | HourBin | UserMostPop | UMP_DN | UMP_WW | n_test |
+|------|--------:|--------:|--------:|--------:|--------:|--------:|--------:|--------:|-------:|
+| Tokyo | 0.034 | 0.014 | 0.120 | 0.057 | 0.047 | 0.186 | **0.202** | 0.165 | 1097 |
+| Melbourne | 0.011 | 0.025 | 0.065 | 0.015 | 0.010 | **0.106** | 0.104 | 0.099 | 1573 |
+| Beijing | 0.139 | 0.087 | 0.226 | 0.070 | 0.148 | 0.304 | **0.357** | 0.296 | 115 |
+| Shanghai | 0.022 | 0.029 | 0.066 | 0.023 | 0.037 | 0.114 | **0.118** | 0.109 | 728 |
+| Sydney | 0.003 | 0.021 | 0.108 | 0.009 | 0.010 | **0.133** | 0.131 | 0.111 | 2030 |
+| Palembang | 0.017 | 0.010 | 0.073 | 0.003 | 0.017 | 0.169 | **0.179** | 0.162 | 940 |
+| Moscow | 0.011 | 0.012 | 0.101 | 0.011 | 0.017 | 0.165 | **0.174** | 0.155 | 7897 |
+| New-York | 0.008 | 0.008 | 0.073 | 0.004 | 0.007 | 0.095 | **0.108** | 0.092 | 18409 |
+| Sao-Paulo | 0.009 | 0.011 | 0.112 | 0.006 | 0.008 | 0.143 | **0.169** | 0.140 | 17938 |
+| Bandung | 0.012 | 0.006 | 0.087 | 0.009 | 0.014 | 0.144 | **0.153** | 0.130 | 11067 |
+| Istanbul | 0.017 | 0.006 | 0.086 | 0.013 | 0.020 | 0.134 | **0.147** | 0.123 | 43283 |
+| Jakarta | 0.009 | 0.007 | 0.076 | 0.005 | 0.009 | 0.143 | **0.148** | 0.129 | 27480 |
+| Kuwait-City | 0.012 | 0.003 | 0.090 | 0.023 | 0.031 | 0.160 | **0.163** | 0.143 | 18332 |
+| Petaling-Jaya | 0.010 | 0.005 | 0.073 | 0.011 | 0.011 | 0.106 | **0.116** | 0.099 | 36082 |
+| Tangerang | 0.022 | 0.008 | 0.140 | 0.012 | 0.022 | **0.221** | **0.221** | 0.200 | 3197 |
 
-表：[`data/research-baselines.csv`](data/research-baselines.csv) · 对照论文：[`data/research-baselines-vs-paper.csv`](data/research-baselines-vs-paper.csv) · 分层：[`data/research-baseline-strata.csv`](data/research-baseline-strata.csv)
+**读数：** 全 15 城 **UserMostPop 或 UMP_DN** 主导 Acc@1；**Markov1** 稳居非个性化最强；**Nearest / CatMarkov / 全局时间桶** 通常弱得多。新方法应报相对 UMP_DN 与 Markov1 的 lift。
 
-| city | UserMostPop | Markov1 | MostPop | Nearest | STHGCN [cited] |
-|------|------------:|--------:|--------:|--------:|---------------:|
-| Tokyo | **0.186** | 0.119 | 0.034 | ~0.01 | 0.250 |
-| Melbourne | **0.106** | 0.065 | 0.011 | ~0.02 | 0.168 |
-| Beijing | **0.304** | 0.217 | 0.139 | ~0.07 | 0.453 |
-| Shanghai | **0.114** | 0.067 | 0.022 | ~0.02 | 0.193 |
-
-### 3.3 时间条件 MostPop：UTC-as-stored vs 城市本地时 [measured]
-
-**两种时间模式（必须并列）：**
-
-| 模式 | 做法 |
-|------|------|
-| **UTC-as-stored** | 对 naive `timestamp` **直接**取 `hour` / `weekday`（= 把剥掉 offset 的值当作 UTC 钟点；与历史 temporal 数字一致） |
-| **City local** | `tz_localize("UTC")` → `tz_convert(IANA)`：Tokyo `Asia/Tokyo` · Melbourne `Australia/Melbourne` · Beijing/Shanghai `Asia/Shanghai` |
-
-IANA 与桶定义：[`data/bin_definition.json`](data/bin_definition.json) · 完整长表：[`data/utc_local_temporal_baselines.csv`](data/utc_local_temporal_baselines.csv) · 桶错位元数据：[`data/utc_local_time_meta.csv`](data/utc_local_time_meta.csv) · Acc 差分：[`data/utc_local_acc_deltas.csv`](data/utc_local_acc_deltas.csv)
-
-![Acc@1 UTC vs local](figures/temporal_baselines_acc1_utc_vs_local.png)
-
-**图注：** 官方切分下 MostPop / SameWeekday / DayNight / SameHourBin 的 Acc@1，左 UTC-as-stored、右城市本地时并排。用来检查「换成本地时后廉价时间桶还值不值得报」——多数城 Top-1 变化很小，但 DayNight @5/@10 与个别城（Beijing SameWeekday）有可见错位。
-
-#### Official Acc@1（并排）
-
-| city | MostPop | SW utc | SW local | DN utc | DN local | HB utc | HB local |
-|------|--------:|-------:|---------:|-------:|---------:|-------:|---------:|
-| Tokyo | 0.034 | 0.040 | 0.038 | 0.034 | 0.034 | **0.048** | 0.047 |
-| Melbourne | 0.011 | **0.013** | **0.013** | 0.010 | 0.010 | 0.011 | 0.010 |
-| Beijing | 0.139 | 0.087 | 0.113 | 0.139 | **0.148** | **0.148** | **0.148** |
-| Shanghai | 0.022 | 0.023 | 0.023 | 0.025 | 0.029 | **0.037** | **0.037** |
-
-（SW=SameWeekday，DN=DayNight，HB=SameHourBin；四舍五入。n_test：Tokyo 1097 · Mel 1573 · BJ 115 · SH 728。）
-
-#### Official Acc@5（并排）
-
-| city | MostPop | SW utc | SW local | DN utc | DN local | HB utc | HB local |
-|------|--------:|-------:|---------:|-------:|---------:|-------:|---------:|
-| Tokyo | 0.100 | 0.103 | 0.099 | 0.106 | **0.125** | 0.131 | **0.139** |
-| Melbourne | 0.035 | 0.039 | 0.038 | 0.041 | 0.043 | 0.041 | **0.048** |
-| Beijing | 0.226 | 0.174 | 0.174 | 0.217 | **0.226** | 0.200 | 0.200 |
-| Shanghai | 0.060 | 0.055 | 0.062 | 0.065 | **0.070** | 0.065 | 0.065 |
-
-#### Official Acc@10（并排）
-
-| city | MostPop | SW utc | SW local | DN utc | DN local | HB utc | HB local |
-|------|--------:|-------:|---------:|-------:|---------:|-------:|---------:|
-| Tokyo | 0.151 | 0.149 | 0.151 | 0.157 | **0.181** | 0.183 | **0.199** |
-| Melbourne | 0.062 | 0.063 | 0.065 | 0.067 | 0.067 | 0.076 | **0.077** |
-| Beijing | 0.243 | 0.191 | 0.200 | 0.261 | **0.278** | **0.270** | **0.270** |
-| Shanghai | 0.091 | 0.074 | 0.091 | 0.088 | **0.099** | 0.092 | 0.092 |
-
-透视 CSV：[`data/acc1_utc_vs_local_official.csv`](data/acc1_utc_vs_local_official.csv) · [`data/acc5_utc_vs_local_official.csv`](data/acc5_utc_vs_local_official.csv) · [`data/acc10_utc_vs_local_official.csv`](data/acc10_utc_vs_local_official.csv)
-
-#### 桶错位与读数
-
-官方 test 目标时刻上，**UTC vs local**：
-
-| city | hour 不一致 | weekday 不一致 | DayNight 不一致 | hour_bin 不一致 |
-|------|------------:|---------------:|----------------:|----------------:|
-| Tokyo | 1.00 | 0.13 | 0.74 | 1.00 |
-| Melbourne | 1.00 | 0.09 | 0.83 | 1.00 |
-| Beijing | 1.00 | 0.03 | 0.77 | 1.00 |
-| Shanghai | 1.00 | 0.06 | 0.68 | 1.00 |
-
-1. **Hour / hour_bin 几乎总是错位**（偏移 8–11h），但 **SameHourBin Acc@1 多数城几乎不变**——桶内流行度排序对整体平移有一定鲁棒性；Tokyo/Mel @5/@10 本地时略升。  
-2. **DayNight 二桶在 UTC 下常 ≈ MostPop**；改成本地时后 Tokyo/Shanghai @5/@10、Beijing Acc@1 有小幅改善（日间窗对准真实通勤/活动）。  
-3. **SameWeekday**：Beijing Acc@1 从 0.087→0.113（+2.6pp）——跨日界造成的 weekday 错桶最伤小样本城。  
-4. **结论不变：** 时间仍是弱全局先验，**SameHourBin 仍是最强廉价时间桶**；解释行为节律请用 **local**，复现旧表请用 **UTC-as-stored**。本专题时间桶表 **仅报 official**。
-
-### 3.4 时间 / 个性化基线总表 + 长尾过滤 [measured · official · local · **full HF**]
-
-**数据确认（本表）：** 使用 CRUISE Massive-STEPS **完整** HF city CSV（`*_checkins_{train,validation,test}.csv` 行数之和 = `*_checkins.csv`；**无** city/row subsample）。fit = official train；eval = official test。下载与校验：[`data/hf_download_provenance.csv`](data/hf_download_provenance.csv)。
-
-| city | HF dataset ID | train rows | test trails | covers_full |
-|------|---------------|----------:|------------:|:-----------:|
-| Tokyo | `CRUISEResearchGroup/Massive-STEPS-Tokyo` | 9691 | 1097 | ✓ |
-| Melbourne | `…-Melbourne` | 15419 | 1573 | ✓ |
-| Beijing | `…-Beijing` | 1044 | 115 | ✓ |
-| Shanghai | `…-Shanghai` | 7375 | 728 | ✓ |
-| Sydney | `…-Sydney` | 21027 | 2030 | ✓ |
-| Palembang | `…-Palembang` | 10132 | 940 | ✓ |
-| Moscow | `…-Moscow` | 74113 | 7897 | ✓ |
-| New-York | `…-New-York` | 190740 | 18409 | ✓ |
-| Sao-Paulo | `…-Sao-Paulo` | 179771 | 17938 | ✓ |
-
-Collection：[Massive-STEPS HF](https://huggingface.co/collections/CRUISEResearchGroup/massive-steps-point-of-interest-check-in-dataset-682716f625d74c2569bc7a73)。下载：`hf download CRUISEResearchGroup/Massive-STEPS-{City} --repo-type dataset`。
-
-**定义（伪代码；prediction time = 被预测 check-in 的 local timestamp）：**
-
-```
-# Work = weekday∈{Mon..Fri}; Weekend = {Sat,Sun}; split = official only
-fit UserMostPop_*:
-  user_bin[u][bin(c.local_*)][v] += 1;  user_global[u][v] += 1
-predict:  # t = check-in being predicted (= trail last); time = t.timestamp
-  merge(user_bin[u][bin(t)], user_global[u], MostPop)
-# bin ∈ {daynight, weekday, workweekend}
-```
-
-**长尾过滤（个性化 / 时段桶评测；唯一允许的行过滤）：** 仅保留 train 上满足  
-**≥5 check-ins** 且 **day≥2 & night≥2** 且 **work≥2 & weekend≥2**（本地时）的用户的 test trails。  
-元数据：[`data/longtail_filter_meta.csv`](data/longtail_filter_meta.csv) · 定义：[`data/bin_definition.json`](data/bin_definition.json)。  
-**主表 = filtered**；unfiltered 对照同文件族。
-
-CSV：[`data/acc1_full_comparison_official_local.csv`](data/acc1_full_comparison_official_local.csv) · [`acc5_…`](data/acc5_full_comparison_official_local.csv) · [`acc10_…`](data/acc10_full_comparison_official_local.csv) · unfiltered：`acc*_comparison_unfiltered_official_local.csv` · 长表：[`data/usermostpop_time_bins.csv`](data/usermostpop_time_bins.csv)
+### 3.3 Official Acc@1（local · **filtered** · 个性化时段主表）
 
 ![Full comparison Acc@1](figures/full_comparison_acc1_official_local.png)
 
-**图注：** 九城官方·本地时八模型 Acc@1（完整 HF）；左 filtered（主表）、右 unfiltered。UMP_DN 仍多为最强个性化；UMP_WorkWeekend systematically 优于稀疏的 UMP_Weekday。
+**图注：** 官方·本地时多模型 Acc@1；左 filtered、右 unfiltered（图为代表性城子集）。UMP_DN 仍是最强个性化廉价基线；UMP_WW 通常优于稀疏的 UMP_WD。
 
-#### Official Acc@1（local · **filtered** · primary）
+CSV：[`data/acc1_full_comparison_official_local.csv`](data/acc1_full_comparison_official_local.csv) · Acc@5/10：[`data/acc5_full_comparison_official_local.csv`](data/acc5_full_comparison_official_local.csv) · [`data/acc10_full_comparison_official_local.csv`](data/acc10_full_comparison_official_local.csv)
 
-| city | MostPop | DayNight | SameWD | HourBin | UMP | **UMP_DN** | UMP_WD | UMP_WW | n_test | n_users |
-|------|--------:|---------:|-------:|--------:|----:|-----------:|-------:|-------:|-------:|--------:|
+| city | MostPop | DayNight | SameWD | HourBin | UserMostPop | UMP_DN | UMP_WD | UMP_WW | n_test | n_users |
+|------|--------:|--------:|--------:|--------:|--------:|--------:|--------:|--------:|-------:|--------:|
 | Tokyo | 0.026 | 0.026 | 0.026 | 0.035 | 0.200 | **0.216** | 0.165 | 0.174 | 666 | 276 |
 | Melbourne | 0.011 | 0.008 | 0.011 | 0.009 | **0.120** | 0.117 | 0.081 | 0.111 | 1286 | 362 |
 | Beijing | 0.176 | 0.187 | 0.143 | 0.187 | 0.341 | **0.385** | 0.220 | 0.330 | 91 | 30 |
@@ -294,183 +206,176 @@ CSV：[`data/acc1_full_comparison_official_local.csv`](data/acc1_full_comparison
 | Moscow | 0.009 | 0.013 | 0.009 | 0.015 | 0.190 | **0.204** | 0.139 | 0.178 | 5273 | 1945 |
 | New-York | 0.007 | 0.006 | 0.006 | 0.007 | 0.098 | **0.115** | 0.077 | 0.095 | 15616 | 4045 |
 | Sao-Paulo | 0.009 | 0.009 | 0.009 | 0.008 | 0.145 | **0.173** | 0.114 | 0.141 | 14491 | 3438 |
+| Bandung | 0.012 | 0.012 | 0.011 | 0.013 | 0.155 | **0.163** | 0.102 | 0.140 | 9578 | 2228 |
+| Istanbul | 0.016 | 0.016 | 0.016 | 0.020 | 0.152 | **0.169** | 0.108 | 0.137 | 29821 | 10957 |
+| Jakarta | 0.009 | 0.009 | 0.009 | 0.009 | 0.156 | **0.161** | 0.107 | 0.140 | 23867 | 5498 |
+| Kuwait-City | 0.013 | 0.026 | 0.024 | 0.028 | 0.186 | **0.190** | 0.137 | 0.167 | 12995 | 4439 |
+| Petaling-Jaya | 0.009 | 0.009 | 0.008 | 0.010 | 0.119 | **0.131** | 0.086 | 0.111 | 29418 | 8610 |
+| Tangerang | 0.022 | 0.022 | 0.022 | 0.022 | 0.238 | **0.243** | 0.175 | 0.218 | 2556 | 796 |
 
-#### Official Acc@1（local · unfiltered）
+![UMP timebins](figures/usermostpop_timebins_acc1_local.png)
 
-| city | MostPop | DayNight | SameWD | HourBin | UMP | **UMP_DN** | UMP_WD | UMP_WW | n_test | n_users |
-|------|--------:|---------:|-------:|--------:|----:|-----------:|-------:|-------:|-------:|--------:|
-| Tokyo | 0.034 | 0.034 | 0.038 | 0.047 | 0.186 | **0.202** | 0.158 | 0.165 | 1097 | 647 |
-| Melbourne | 0.011 | 0.010 | 0.013 | 0.010 | **0.106** | 0.104 | 0.074 | 0.099 | 1573 | 583 |
-| Beijing | 0.139 | 0.148 | 0.113 | 0.148 | 0.304 | **0.357** | 0.200 | 0.296 | 115 | 52 |
-| Shanghai | 0.022 | 0.029 | 0.023 | 0.037 | 0.114 | **0.118** | 0.106 | 0.109 | 728 | 259 |
-| Sydney | 0.003 | 0.001 | 0.005 | 0.010 | **0.133** | 0.131 | 0.099 | 0.111 | 2030 | 679 |
-| Palembang | 0.017 | 0.017 | 0.017 | 0.017 | 0.169 | **0.179** | 0.101 | 0.162 | 940 | 256 |
-| Moscow | 0.011 | 0.015 | 0.010 | 0.017 | 0.165 | **0.174** | 0.126 | 0.155 | 7897 | 3993 |
-| New-York | 0.008 | 0.007 | 0.008 | 0.007 | 0.095 | **0.108** | 0.074 | 0.092 | 18409 | 6227 |
-| Sao-Paulo | 0.009 | 0.009 | 0.009 | 0.008 | 0.143 | **0.169** | 0.113 | 0.140 | 17938 | 5440 |
+**图注：** filtered 上 UMP / UMP_DN / UMP_WD / UMP_WW 的 Acc@1。UMP_DN 多数城领先；UMP_WW 是对 7 路 weekday 稀疏的稳健替代。
 
-#### Official Acc@5（local · filtered）
+#### Acc@5（filtered · 摘要）
 
-| city | MostPop | DayNight | SameWD | HourBin | UMP | **UMP_DN** | UMP_WD | UMP_WW | n_test |
-|------|--------:|---------:|-------:|--------:|----:|-----------:|-------:|-------:|-------:|
-| Tokyo | 0.074 | 0.111 | 0.084 | 0.129 | 0.399 | **0.417** | 0.378 | 0.377 | 666 |
-| Melbourne | 0.033 | 0.039 | 0.037 | 0.048 | 0.257 | **0.259** | 0.218 | 0.240 | 1286 |
-| Beijing | 0.264 | 0.264 | 0.209 | 0.253 | **0.505** | 0.495 | 0.451 | 0.451 | 91 |
-| Shanghai | 0.062 | 0.076 | 0.065 | 0.065 | 0.210 | **0.212** | 0.181 | 0.203 | 581 |
-| Sydney | 0.013 | 0.037 | 0.018 | 0.047 | 0.299 | **0.300** | 0.253 | 0.283 | 1678 |
-| Palembang | 0.082 | 0.082 | 0.082 | 0.085 | **0.337** | 0.336 | 0.288 | 0.321 | 858 |
-| Moscow | 0.035 | 0.043 | 0.040 | 0.051 | 0.391 | **0.391** | 0.354 | 0.379 | 5273 |
-| New-York | 0.019 | 0.019 | 0.019 | 0.024 | 0.244 | **0.255** | 0.214 | 0.235 | 15616 |
-| Sao-Paulo | 0.022 | 0.025 | 0.022 | 0.026 | 0.372 | **0.382** | 0.334 | 0.371 | 14491 |
+| city | UserMostPop | UMP_DN | UMP_WW | Markov1 |
+|------|--------:|--------:|--------:|--------:|
+| Tokyo | 0.399 | **0.417** | 0.377 | 0.212 |
+| Melbourne | 0.257 | **0.259** | 0.240 | 0.123 |
+| Beijing | **0.505** | 0.495 | 0.451 | 0.451 |
+| Shanghai | 0.210 | **0.212** | 0.203 | 0.133 |
+| Sydney | 0.299 | **0.300** | 0.283 | 0.191 |
+| Palembang | **0.337** | 0.336 | 0.321 | 0.153 |
+| Moscow | 0.391 | **0.391** | 0.379 | 0.205 |
+| New-York | 0.244 | **0.255** | 0.235 | 0.140 |
+| Sao-Paulo | 0.372 | **0.382** | 0.371 | 0.216 |
+| Bandung | **0.320** | 0.316 | 0.307 | 0.170 |
+| Istanbul | 0.358 | **0.361** | 0.340 | 0.191 |
+| Jakarta | **0.306** | 0.302 | 0.294 | 0.160 |
+| Kuwait-City | 0.390 | **0.393** | 0.375 | 0.217 |
+| Petaling-Jaya | 0.256 | **0.261** | 0.243 | 0.161 |
+| Tangerang | **0.466** | 0.461 | 0.452 | 0.248 |
 
-#### Official Acc@10（local · filtered）
+#### Acc@10（filtered · 摘要）
 
-| city | MostPop | DayNight | SameWD | HourBin | UMP | **UMP_DN** | UMP_WD | UMP_WW | n_test |
-|------|--------:|---------:|-------:|--------:|----:|-----------:|-------:|-------:|-------:|
-| Tokyo | 0.140 | 0.167 | 0.138 | 0.197 | 0.488 | **0.489** | 0.488 | 0.470 | 666 |
-| Melbourne | 0.054 | 0.061 | 0.062 | 0.078 | **0.329** | 0.320 | 0.300 | 0.309 | 1286 |
-| Beijing | 0.286 | 0.319 | 0.242 | 0.308 | 0.538 | 0.516 | 0.484 | **0.549** | 91 |
-| Shanghai | 0.086 | 0.095 | 0.091 | 0.095 | 0.250 | **0.263** | 0.234 | 0.255 | 581 |
-| Sydney | 0.033 | 0.061 | 0.036 | 0.086 | 0.361 | **0.365** | 0.337 | 0.353 | 1678 |
-| Palembang | 0.101 | 0.108 | 0.107 | 0.118 | **0.429** | 0.408 | 0.385 | 0.392 | 858 |
-| Moscow | 0.063 | 0.067 | 0.065 | 0.075 | 0.463 | **0.468** | 0.452 | 0.457 | 5273 |
-| New-York | 0.029 | 0.032 | 0.028 | 0.034 | 0.306 | **0.313** | 0.284 | 0.299 | 15616 |
-| Sao-Paulo | 0.036 | 0.039 | 0.038 | 0.044 | 0.455 | **0.462** | 0.437 | 0.455 | 14491 |
+| city | UserMostPop | UMP_DN | UMP_WW | Markov1 |
+|------|--------:|--------:|--------:|--------:|
+| Tokyo | 0.488 | **0.489** | 0.470 | 0.261 |
+| Melbourne | **0.329** | 0.320 | 0.309 | 0.156 |
+| Beijing | 0.538 | 0.516 | **0.549** | 0.462 |
+| Shanghai | 0.250 | **0.263** | 0.255 | 0.157 |
+| Sydney | 0.361 | **0.365** | 0.353 | 0.211 |
+| Palembang | **0.429** | 0.408 | 0.392 | 0.190 |
+| Moscow | 0.463 | **0.468** | 0.457 | 0.255 |
+| New-York | 0.306 | **0.313** | 0.299 | 0.163 |
+| Sao-Paulo | 0.455 | **0.462** | 0.455 | 0.262 |
+| Bandung | **0.386** | 0.382 | 0.374 | 0.213 |
+| Istanbul | 0.440 | **0.441** | 0.428 | 0.248 |
+| Jakarta | **0.364** | 0.360 | 0.355 | 0.200 |
+| Kuwait-City | **0.487** | 0.486 | 0.473 | 0.295 |
+| Petaling-Jaya | 0.319 | **0.323** | 0.310 | 0.206 |
+| Tangerang | **0.543** | 0.540 | 0.543 | 0.285 |
 
-**读数：** (1) 四城核心 Acc 与先前 full-HF 数字一致（Tokyo/Mel/BJ/SH 未 subsample）。(2) **UMP_DN** 在多数城（含 New-York / Sao-Paulo / Moscow）仍抬升 Acc@1。(3) **UMP_WW ≫ UMP_WD**；全局时间桶仍远弱于个性化。
+### 3.4 Weekend 三项指标（local）
 
-### 3.5 Weekend 三项指标
-
-论文任务：末次 check-in 是否周末（`dow ≥ 5`）。**历史数字按 UTC-as-stored weekday**；本地时会改变贴近日界的标签，完整重算留待后续（本 lean 更新聚焦时间条件 MostPop）。
-
-| 术语 | 定义 |
-|------|------|
-| 周末 base rate | \(P(\text{末站在周末})\)，全城 trails |
-| Majority Acc | 永远猜多数类（四城周末率&lt;0.5 → Acc = 1 − base rate） |
-| 末POI类别规则 Acc | train 上学「末站类别 → 周末/工作日」，test 查表 |
-
-重算：[`data/weekend_baselines.csv`](data/weekend_baselines.csv)
+末次 check-in 是否周末（`dow ≥ 5`，**local**）。重算：[`data/weekend_baselines.csv`](data/weekend_baselines.csv)
 
 | city | base rate | Majority | 类别规则 |
 |------|----------:|---------:|---------:|
-| Tokyo | 0.444 | 0.556 | 0.565 |
-| Melbourne | 0.324 | 0.676 | 0.657 |
-| Beijing | 0.297 | 0.703 | 0.669 |
-| Shanghai | 0.323 | 0.677 | 0.654 |
+| Tokyo | 0.445 | 0.555 | 0.547 |
+| Melbourne | 0.333 | 0.667 | 0.656 |
+| Beijing | 0.307 | 0.693 | 0.600 |
+| Shanghai | 0.335 | 0.665 | 0.626 |
+| Sydney | 0.320 | 0.680 | 0.651 |
+| Palembang | 0.326 | 0.674 | 0.682 |
+| Moscow | 0.261 | 0.739 | 0.736 |
+| New-York | 0.336 | 0.664 | 0.665 |
+| Sao-Paulo | 0.251 | 0.749 | 0.759 |
+| Bandung | 0.319 | 0.681 | 0.676 |
+| Istanbul | 0.298 | 0.702 | 0.706 |
+| Jakarta | 0.337 | 0.663 | 0.660 |
+| Kuwait-City | 0.247 | 0.753 | 0.754 |
+| Petaling-Jaya | 0.335 | 0.665 | 0.662 |
+| Tangerang | 0.354 | 0.646 | 0.650 |
 
-偏斜城上类别规则**打不赢** majority；应报 **lift**。
-
----
-
-## 4. 切分稳定性 [measured]
-
-三协议：**(a) official** HF 切分 · **(b) user-disjoint** 用户 80/20 · **(c) time-based** 按 trail 末时间最早 80% / 最晚 20%。
-
-元数据：[`data/split_meta.csv`](data/split_meta.csv) · 全表：[`data/baselines_by_split.csv`](data/baselines_by_split.csv) · 翻榜：[`data/ranking_flips.csv`](data/ranking_flips.csv)
-
-![Acc@1 by split](figures/acc1_by_split.png)
-
-**图注：** 同一套廉价基线在 official / user-disjoint / time-based 三种切分下的 Acc@1。官方协议下 UserMostPop 四城全胜；user-disjoint 后 Top-1 **一律翻转**——不报多协议的 SOTA 在泛化语义上不可信。
-
-| city | official Top-1 | user-disjoint Top-1 | time-based Top-1 |
-|------|----------------|---------------------|------------------|
-| Tokyo | UserMostPop | **Markov1** | UserMostPop |
-| Melbourne | UserMostPop | **Nearest** | **Nearest** |
-| Beijing | UserMostPop | **Markov1** | UserMostPop |
-| Shanghai | UserMostPop | **Nearest** | UserMostPop |
+偏斜城上类别规则常打不赢 / 仅略胜 majority；应报 **lift**。
 
 ---
 
-## 5. 轨迹时间跨度 [measured]
+## 4. 轨迹时间跨度 [measured · full HF]
 
-定义：`duration = last_ts − first_ts`（小时）。δτ=8h 约束的是**相邻间隔**，不是总跨度。（跨度对 timezone 平移不敏感。）
+定义：`duration = last_ts − first_ts`（小时）。δτ=8h 约束相邻间隔，不是总跨度。
 
 汇总：[`data/trail_duration_stats.csv`](data/trail_duration_stats.csv)
 
 ![duration hist](figures/trail_duration_histograms.png)
 
-**图注：** 各城 trail 总跨度（小时）分布。中位约 2.5–3.1h，约 85–88% ≤8h；均值被极长尾拉高。多数预测落在数小时窗口，粗 weekday 节律收益有限，与时间 MostPop 弱增益一致。
+**图注：** 核心四城 trail 总跨度分布。中位约 2.5–3.1h，约 85–89% ≤8h。
 
 ![span vs length](figures/trail_span_vs_length.png)
 
-**图注：** 轨迹跨度 vs 轨迹长度散点及相关性。相关弱（r≈0.10–0.27）：更长序列略更长时段，但短序列已可铺满数小时——「序列深度」≠「时间跨度」。
+**图注：** 跨度 vs 长度；相关弱——「序列深度」≠「时间跨度」。
 
 | city | n | median (h) | p90 (h) | ≤4h | ≤8h | corr(span,len) |
 |------|--:|-----------:|--------:|----:|----:|---------------:|
 | Tokyo | 5482 | 2.50 | 10.07 | 0.64 | 0.86 | 0.16 |
-| Melbourne | 7864 | 3.12 | 8.80 | 0.59 | 0.88 | 0.10 |
+| Melbourne | 7864 | 3.12 | 8.79 | 0.59 | 0.88 | 0.10 |
 | Beijing | 573 | 2.97 | 9.55 | 0.61 | 0.85 | 0.27 |
 | Shanghai | 3636 | 2.75 | 9.25 | 0.63 | 0.87 | 0.15 |
+| Sydney | 10148 | 3.12 | 9.21 | 0.59 | 0.86 | 0.07 |
+| Palembang | 4699 | 3.27 | 9.52 | 0.57 | 0.85 | 0.07 |
+| Moscow | 39485 | 2.68 | 8.42 | 0.64 | 0.89 | 0.13 |
+| New-York | 92041 | 3.38 | 9.47 | 0.56 | 0.86 | 0.10 |
+| Sao-Paulo | 89689 | 3.23 | 10.00 | 0.57 | 0.85 | 0.10 |
+| Bandung | 55333 | 3.22 | 9.58 | 0.58 | 0.86 | 0.20 |
+| Istanbul | 216411 | 2.77 | 8.45 | 0.64 | 0.89 | 0.08 |
+| Jakarta | 137396 | 3.15 | 9.15 | 0.59 | 0.87 | 0.22 |
+| Kuwait-City | 91658 | 2.23 | 8.68 | 0.69 | 0.89 | 0.07 |
+| Petaling-Jaya | 180410 | 2.93 | 8.82 | 0.61 | 0.88 | 0.16 |
+| Tangerang | 15984 | 2.73 | 9.83 | 0.62 | 0.86 | 0.22 |
 
 ---
 
-## 6. 地图：极简灰底气泡 / 流向
+## 5. 地图（子集：Tokyo / Melbourne / Beijing / Shanghai）
 
-对 Tokyo / Melbourne / Beijing / Shanghai：浅灰底图（`Esri.WorldGrayCanvas` 系；**当代**瓦片，**不声称** 2012–18 历史路网）+ 分位数网格质心；同 `trail_id` 相邻 check-in 为 OD。
-
-| 文件 | 含义 |
-|------|------|
-| `{city}_minimal_bubbles.png` | 红色半透明比例圆（∝ 格子 check-in） |
-| `{city}_minimal_flows.png` | Top OD desire lines（色/宽 ∝ **Relative flow %**） |
-
-目录：[`maps/`](maps/)（含 `*_grid_region_stats.csv` / `*_top_od_flows.csv`）
+浅灰底图（`Esri.WorldGrayCanvas`；**当代**瓦片，**不声称** 2012–18 历史路网）+ 分位数网格质心；同 `trail_id` 相邻 check-in 为 OD。目录：[`maps/`](maps/)。
 
 ### Tokyo
 
 ![Tokyo bubbles](maps/tokyo_minimal_bubbles.png)
 
-**图注：** Tokyo 网格气泡——签到集中在少数枢纽格。提示「先网格/H3 召回再 POI 消歧」比全城硬排更合理。
+**图注：** Tokyo 网格气泡——签到集中在少数枢纽格。
 
 ![Tokyo flows](maps/tokyo_minimal_flows.png)
 
-**图注：** Tokyo Top OD 期望线（Relative flow %）。主流量偏区内短距枢纽换乘，而非长距放射；适合 hub-aware 图先验。
+**图注：** Tokyo Top OD（Relative flow %）；主流量偏短距枢纽换乘。
 
 ### Melbourne
 
 ![Melbourne bubbles](maps/melbourne_minimal_bubbles.png)
 
-**图注：** Melbourne 气泡更偏 CBD 核心堆积，郊区格稀疏——中心–边缘结构强于 Tokyo。
+**图注：** Melbourne 更偏 CBD 核心堆积。
 
 ![Melbourne flows](maps/melbourne_minimal_flows.png)
 
-**图注：** Melbourne 流向呈 CBD 核心 + 放射状长边；与 admin 同区转移较低一致，适合「中心–郊区」OD 研究。
+**图注：** Melbourne CBD 核心 + 放射状长边。
 
 ### Beijing
 
 ![Beijing bubbles](maps/beijing_minimal_bubbles.png)
 
-**图注：** Beijing 样本小、热点更碎；解读气泡大小时注意方差与坐标 fallback 堆叠风险。
+**图注：** Beijing 样本小、热点更碎；注意方差与坐标 fallback。
 
 ![Beijing flows](maps/beijing_minimal_flows.png)
 
-**图注：** Beijing Top OD。小样本下头部队列不稳定，宜作定性结构而非精确流量排名。
+**图注：** Beijing Top OD；宜作定性结构。
 
 ### Shanghai
 
 ![Shanghai bubbles](maps/shanghai_minimal_bubbles.png)
 
-**图注：** Shanghai 气泡沿核心城区聚集；同 admin 转移极高，空间分辨率常坍缩到区级。
+**图注：** Shanghai 沿核心城区聚集。
 
 ![Shanghai flows](maps/shanghai_minimal_flows.png)
 
-**图注：** Shanghai 流向以短距核心往返为主。解释地图时声明 admin 回退可能制造伪热点。
+**图注：** Shanghai 短距核心往返为主。
 
 ---
 
-## 7. 优先课题（精简）
+## 6. 优先课题（精简）
 
-1. **切分协议一等公民**：三协议联合排行榜；量化官方 Acc 中同用户泄漏（UserMostPop 必报）。  
+1. **Official + UMP 必报**：新方法至少超过 UserMostPop / UMP_DN 与 Markov1。  
 2. **单步上下文专用模型**：针对 ctx_len=1 的多数 test。  
-3. **Unseen-POI / 开放词表**：name·address·category·坐标；单独报 unseen 子集。  
-4. **空间–语义两阶段**：网格/OD 召回 + 语义重排。  
-5. **坐标缺失鲁棒**：精确坐标 / fallback / missing token 三设置。  
-6. **2013↔2018 漂移与开闭店**：period-conditioned；勿对 Tokyo 一刀切纵向。  
+3. **Unseen-POI / 开放词表**：单独报 unseen 子集。  
+4. **空间–语义两阶段**：网格/OD 召回 + 语义重排（Nearest/CatMarkov 单打上限低）。  
+5. **坐标缺失鲁棒**：精确 / fallback / missing token 三设置。  
+6. **2013↔2018 漂移**：period-conditioned；勿对 Tokyo 一刀切纵向。  
 7. **跨城 category/text 迁移**：leave-one-city-out。  
-8. **Weekend lift 协议**：相对 majority；难例子=末类别规则错。  
+8. **Weekend lift**：相对 majority。  
 9. **Hub-aware 图先验**：用 OD/转移强度正则化。  
-10. **时间戳本地时**：新基线默认 **IANA local**；UTC-as-stored 仅作历史对照。  
-11. **个性化×时段**：UserMostPop_DayNight 已抬升多城 Acc@1；探索更细 hour-bin 用户桶 vs 过碎 weekday。  
-12. **廉价基线决策卡**：由数据特征预测该用哪条基线、深度模型最小有意义增益。
+10. **时间戳本地时**：行为与时间桶以 IANA local 为准。  
+11. **廉价基线决策卡**：由数据特征预测该用哪条基线。
 
 ---
 
@@ -480,8 +385,10 @@ CSV：[`data/acc1_full_comparison_official_local.csv`](data/acc1_full_comparison
 |------|------|
 | [`massive-steps-analysis.md`](massive-steps-analysis.md) | 本报告 |
 | [`README.md`](README.md) | 目录索引 |
-| [`massive-steps-cited-city-table.csv`](massive-steps-cited-city-table.csv) | 15 城规模表 |
-| [`massive-steps-measured-summary.csv`](massive-steps-measured-summary.csv) | 10 城实测分布摘要 |
-| [`figures/`](figures/) | 规模/分布、UTC–local 时段、证据、基线、UMP 时段、切分、时长图 |
-| [`data/`](data/) | 研究/基线/切分/时间条件（含 `utc_local_*`、`usermostpop_time_bins*`、`hf_download_provenance.csv`、full-HF Acc 总表）CSV |
-| [`maps/`](maps/) | 极简灰底气泡与流向图 + OD/格子 CSV |
+| [`massive-steps-cited-city-table.csv`](massive-steps-cited-city-table.csv) | 15 城规模表（full HF） |
+| [`massive-steps-measured-summary.csv`](massive-steps-measured-summary.csv) | 15 城实测分布摘要 |
+| [`figures/`](figures/) | 规模/分布、证据、基线、UMP、时长图 |
+| [`data/`](data/) | 研究/基线/时长/过滤/provenance CSV + `bin_definition.json` |
+| [`maps/`](maps/) | 四城极简灰底气泡与流向图 |
+
+**Provenance 确认：** 15/15 城 `covers_full_csv=True`；下载自 `CRUISEResearchGroup/Massive-STEPS-{City}`；无 nrows subsample。
