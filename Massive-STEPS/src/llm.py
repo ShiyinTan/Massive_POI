@@ -87,6 +87,23 @@ class Claude(LLM):
             raise ValueError("response_format must be a pydantic BaseModel or None")
 
 
+# Schema for next-POI LLM baselines (llmzs / llmmob / llmmove).
+# vLLM >= 0.12 removed guided_json; use structured_outputs.json instead.
+NEXT_POI_JSON_SCHEMA = {
+    "properties": {
+        "prediction": {
+            "items": {"anyOf": [{"type": "string"}, {"type": "integer"}]},
+            "title": "Prediction",
+            "type": "array",
+        },
+        "reason": {"title": "Reason", "type": "string"},
+    },
+    "required": ["prediction", "reason"],
+    "title": "NextPOIPrediction",
+    "type": "object",
+}
+
+
 class vLLM(LLM):
     def __init__(self, model: str):
         self.model = model
@@ -98,23 +115,12 @@ class vLLM(LLM):
         try:
             response = self.client.chat.completions.create(
                 model=self.model,
-                # response_format={"type": "json_object"},
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.0,
+                max_tokens=1024,
+                # vLLM native structured outputs (replaces deprecated guided_json)
                 extra_body={
-                    "guided_json": {
-                        "properties": {
-                            "prediction": {
-                                "items": {"anyOf": [{"type": "string"}, {"type": "integer"}]},
-                                "title": "Prediction",
-                                "type": "array",
-                            },
-                            "reason": {"title": "Reason", "type": "string"},
-                        },
-                        "required": ["prediction", "reason"],
-                        "title": "NextPOIPrediction",
-                        "type": "object",
-                    },
+                    "structured_outputs": {"json": NEXT_POI_JSON_SCHEMA},
                 },
             )
             result = response.choices[0].message.content
