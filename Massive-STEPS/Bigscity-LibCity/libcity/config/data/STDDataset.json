@@ -1,0 +1,13 @@
+{
+    "min_session_len": 2,
+    "max_session_len": 50,
+    "min_sessions": 3,
+    "min_checkins": 2,
+    "window_size": 8,
+    "batch_size": 20,
+    "num_workers": 0,
+    "cache_dataset": true,
+    "history_type": "splice",
+    "cut_method": "others",
+    "traj_encoder": "StandardTrajectoryEncoder"
+}

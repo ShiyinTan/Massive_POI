@@ -1,0 +1,3 @@
+[submodule "KGE-Graph-Flashback"]
+	path = KGE-Graph-Flashback
+	url = https://github.com/w11wo/KGE-Graph-Flashback.git

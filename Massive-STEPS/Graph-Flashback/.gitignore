@@ -1,0 +1,11 @@
+
+__pycache__/
+
+data/checkins-*.txt
+data/pretrained-model
+KGE/Graphs
+results
+data
+dataset
+POI_graph/
+logs/
