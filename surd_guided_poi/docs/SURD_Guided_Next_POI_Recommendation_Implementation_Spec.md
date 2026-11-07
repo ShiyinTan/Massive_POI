@@ -21,7 +21,7 @@
 
 1.  预测目标是**具体 POI ID**，不是 POI 类别。
 2.  每条训练样本对应一个预测时刻：输入为截至时刻 (t)
-    的用户历史与上下文，标签为下一次访问的 POI (y=POI\_{u,t+1})。
+    的用户历史与上下文，标签为下一次访问的 POI $y=POI_{u,t+1}$。
 3.  每个信息源分别编码；所有 encoder 表示可被推荐网络和 SURD
     概率估计器共享。
 4.  Specific MI 必须按目标 POI 状态 (y) 计算；SURD
@@ -37,7 +37,7 @@
     权重调节的组合分支辅助预测损失。
 9.  所有概率估计都应考虑校准；specific MI 不能只依赖分类准确率。
 10. 先实现 3 个信息源的完整流程，再扩展到 4 个信息源。对 (m)
-    个源枚举全部非空子集的成本是 (2\^m-1)。
+    个源枚举全部非空子集的成本是 (2^m-1)。
 
 ------------------------------------------------------------------------
 
@@ -47,28 +47,30 @@
 
 给定用户 (u) 在时刻 (t) 之前的历史 check-in 序列：
 
-\[ `\mathcal `{=tex}H_u\^t =
-{(v_1,`\tau`{=tex}\_1),(v_2,`\tau`{=tex}\_2),`\ldots`{=tex},(v_t,`\tau`{=tex}\_t)}
-\]
+$$
+\mathcal{H}_u^t = \{(v_1,\tau_1),(v_2,\tau_2),\ldots,(v_t,\tau_t)\}
+$$
 
 其中：
 
 -   (v_i)：第 (i) 次访问的 POI ID；
--   (`\tau`{=tex}\_i)：访问时间；
+-   $\tau_i$：访问时间；
 -   每个 POI (v_i) 有坐标 (loc(v_i)=(lat_i,lon_i))；
 -   可选地有 POI category、用户属性等元数据。
 
 模型预测下一次访问的具体 POI：
 
-\[ Y_n = POI\_{u,t+1}`\in`{=tex}`\mathcal `{=tex}P \]
+$$
+Y_n = \mathrm{POI}_{u,t+1} \in \mathcal{P}
+$$
 
-其中 (`\mathcal `{=tex}P) 是 POI 集合，(K=\|`\mathcal `{=tex}P\|)。
+其中 $\mathcal{P}$ 是 POI 集合，$K=|\mathcal{P}|$。
 
 模型输出：
 
-\[ `\hat{\mathbf p}`{=tex}\_n =
-\[`\hat `{=tex}P(Y=1`\mid `{=tex}x_n),`\ldots`{=tex},`\hat `{=tex}P(Y=K`\mid `{=tex}x_n)\]
-\]
+$$
+\hat{\mathbf{p}}_n = \big[\hat{P}(Y=1\mid x_n),\ldots,\hat{P}(Y=K\mid x_n)\big]
+$$
 
 推荐结果是概率最高的 Top-K POI。
 
@@ -134,9 +136,10 @@
 
 每个信息源对应一个 encoder：
 
-\[ h_i=E\_{`\theta`{=tex}\_i}(Q_i),
-`\qquad `{=tex}h_i`\in`{=tex}`\mathbb `{=tex}R\^d \]
-
+$$
+h_i=E_{\theta_i}(Q_i),
+\qquad h_i\in\mathbb{R}^d
+$$
 建议：
 
 -   History encoder：POI embedding + positional/time embedding +
@@ -157,35 +160,38 @@ mask 或可学习 missing embedding，不要随意填入可能带来偏差的常
 
 将所有信息源表示融合：
 
-\[ h\_{`\mathrm{rec}`{=tex}} =
-`\mathrm{Fusion}`{=tex}(h_1,h_2,`\ldots`{=tex},h_m) \]
-
+$$
+h_{\mathrm{rec}} =
+\mathrm{Fusion}(h_1,h_2,\ldots,h_m)
+$$
 第一版可使用 concat + MLP：
 
-\[ h\_{`\mathrm{rec}`{=tex}} = `\mathrm{MLP}`{=tex}\_{`\psi`{=tex}}
-(\[h_1`\Vert `{=tex}h_2`\Vert`{=tex}`\cdots`{=tex}`\Vert `{=tex}h_m\])
-\]
+$$
+h_{\mathrm{rec}} = \mathrm{MLP}_{\psi}\big([h_1 \Vert h_2 \Vert \cdots \Vert h_m]\big)
+$$
 
 后续可替换为 attention/gating，但应先建立简单 baseline。
 
 ## 3.2 POI 分类头
 
-\[
-z\_{`\mathrm{rec}`{=tex}}=W\_{`\mathrm{rec}`{=tex}}h\_{`\mathrm{rec}`{=tex}}+b\_{`\mathrm{rec}`{=tex}}
-\]
+$$
+z_{\mathrm{rec}}=W_{\mathrm{rec}}h_{\mathrm{rec}}+b_{\mathrm{rec}}
+$$
 
-\[
-`\hat `{=tex}P\_{`\mathrm{rec}`{=tex}}(Y=y`\mid `{=tex}Q_1,`\ldots`{=tex},Q_m)
-=`\mathrm{Softmax}`{=tex}(z\_{`\mathrm{rec}`{=tex}})\_y \]
+$$
+\hat{P}_{\mathrm{rec}}(Y=y\mid Q_1,\ldots,Q_m)
+=\mathrm{Softmax}(z_{\mathrm{rec}})_y
+$$
 
 其中输出维度为训练 POI vocabulary 的大小 (K)。
 
 ## 3.3 推荐损失
 
-\[ `\mathcal `{=tex}L\_{`\mathrm{rec}`{=tex}}
-=-`\frac`{=tex}1N`\sum`{=tex}*{n=1}\^{N}
-`\log `{=tex}`\hat `{=tex}P*{`\mathrm{rec}`{=tex}}(Y=y_n`\mid `{=tex}Q\^{(n)})
-\]
+$$
+\mathcal{L}_{\mathrm{rec}}
+=-\frac{1}{N}\sum_{n=1}^{N}
+\log \hat{P}_{\mathrm{rec}}(Y=y_n\mid Q^{(n)})
+$$
 
 可以在后续实验中加入 class-balanced loss、按频率采样或其他 long-tail
 方法，但第一版应先保留标准 cross-entropy，以便分离 SURD 的实际贡献。
@@ -212,27 +218,32 @@ z\_{`\mathrm{rec}`{=tex}}=W\_{`\mathrm{rec}`{=tex}}h\_{`\mathrm{rec}`{=tex}}+b\_
 ## 4.2 子集条件概率模型
 
 对于任意非空信息源子集
-(A`\subseteq`{=tex}{1,`\ldots`{=tex},m})，建立概率估计器：
+$A \subseteq \{1,\ldots,m\}$，建立概率估计器：
 
-\[ `\hat `{=tex}P_A(Y=y`\mid `{=tex}Q_A) \]
+$$
+\hat{P}_A(Y=y\mid Q_A)
+$$
 
 例如 (m=3) 时，需要考虑：
 
-\[ {Q_1},{Q_2},{Q_3}, {Q_1,Q_2},{Q_1,Q_3},{Q_2,Q_3}, {Q_1,Q_2,Q_3} \]
+$$
+\{Q_1\},\{Q_2\},\{Q_3\},\{Q_1,Q_2\},\{Q_1,Q_3\},\{Q_2,Q_3\},\{Q_1,Q_2,Q_3\}
+$$
 
-总共 (2\^3-1=7) 个非空子集。
+总共 (2^3-1=7) 个非空子集。
 
 每个子集估计器只能接收它对应的 (h_i)，不能访问其他信息源。
 
 可使用轻量 MLP：
 
-\[ `\hat `{=tex}P_A(Y`\mid `{=tex}Q_A)
-=`\mathrm{Softmax}`{=tex}(g\_{`\phi`{=tex}*A}(\[h_i\]*{i`\in `{=tex}A}))
-\]
+$$
+\hat{P}_A(Y\mid Q_A)
+=\mathrm{Softmax}\big(g_{\phi_A}([h_i]_{i\in A})\big)
+$$
 
 ### 共享与独立的建议
 
--   所有子集 head 共享底层信息源 encoder (E\_{`\theta`{=tex}\_i})。
+-   所有子集 head 共享底层信息源 encoder $E_{\theta_i}$。
 -   不同子集有各自的轻量预测 head。
 -   推荐 head 与这些 head 共享 encoder
     表示，但输出层和融合结构可以独立。
@@ -242,7 +253,9 @@ z\_{`\mathrm{rec}`{=tex}}=W\_{`\mathrm{rec}`{=tex}}h\_{`\mathrm{rec}`{=tex}}+b\_
 
 定义训练集目标 POI 的总体频率：
 
-\[ `\hat `{=tex}P(Y=y)=`\frac{N_y}{N}`{=tex} \]
+$$
+\hat{P}(Y=y)=\frac{N_y}{N}
+$$
 
 其中：
 
@@ -255,29 +268,32 @@ z\_{`\mathrm{rec}`{=tex}}=W\_{`\mathrm{rec}`{=tex}}h\_{`\mathrm{rec}`{=tex}}+b\_
 
 对目标 POI (y) 和信息源组合 (Q_A)，定义：
 
-\[ `\tilde `{=tex}i(y;Q_A) = `\mathbb `{=tex}E\_{q_A`\mid `{=tex}Y=y}
-`\left[
+$$
+\tilde{i}(y;Q_A) = \mathbb{E}_{q_A \mid Y=y}
+\left[
 \log
-\frac{P(Y=y\mid Q_A=q_A)}
-{P(Y=y)}
-\right]`{=tex}\]
+\frac{P(Y=y\mid Q_A=q_A)}{P(Y=y)}
+\right]
+$$
 
 用训练/校准样本估计：
 
-\[ `\widehat{\tilde i}`{=tex}(y;Q_A) = `\frac1{N_y}`{=tex}
-`\sum`{=tex}\_{n:Y_n=y} `\log`{=tex}
-`\frac{\hat P_A(Y=y\mid Q_A^{(n)})}`{=tex} {`\hat `{=tex}P(Y=y)} \]
+$$
+\widehat{\tilde{i}}(y;Q_A) = \frac{1}{N_y}
+\sum_{n:Y_n=y} \log
+\frac{\hat{P}_A(Y=y\mid Q_A^{(n)})}{\hat{P}(Y=y)}
+$$
 
 注意：
 
 1.  对每个目标 POI (y)，只平均标签为 (y) 的样本。
 2.  对每个样本，取概率模型对真实目标类别 (y) 输出的概率。
 3.  分子是
-    (`\hat `{=tex}P_A(Y=y`\mid `{=tex}Q_A\^{(n)}))，分母是总体先验
-    (`\hat `{=tex}P(Y=y))。
+    $\hat{P}_A(Y=y\mid Q_A^{(n)})$，分母是总体先验
+    $\hat{P}(Y=y)$。
 4.  可以使用自然对数（nats）或 log2（bits），但整个实验必须统一。
 5.  单个样本的 log-ratio 可以为负；不要把单样本值强制截断为正。
-6.  这里的 (`\tilde `{=tex}i(y;Q_A)) 是 specific
+6.  这里的 $\tilde{i}(y;Q_A$) 是 specific
     information，不应随意写成 (I(Y=y;Q_A))。
 
 ## 4.5 数值稳定性
@@ -285,7 +301,7 @@ z\_{`\mathrm{rec}`{=tex}}=W\_{`\mathrm{rec}`{=tex}}h\_{`\mathrm{rec}`{=tex}}+b\_
 实现时：
 
 -   对预测概率进行 clamp，例如
-    (p`\leftarrow`{=tex}`\max`{=tex}(p,`\epsilon`{=tex}))；
+    $p\leftarrow\max(p,\epsilon$)；
 -   对先验概率同样进行 clamp；
 -   推荐使用 float64 计算 log-ratio 和聚合；
 -   记录每个 POI 的样本数 (N_y)；
@@ -330,18 +346,21 @@ check-in，不应仅凭这些分解声称发现了真实因果效应。
 
 对每个目标 POI (y)，先基于所有子集的 specific information：
 
-\[ `\widehat{\tilde i}`{=tex}(y;Q_A) \]
+$$
+\widehat{\tilde{i}}(y;Q_A)
+$$
 
 执行 SURD 分解，得到：
 
-\[ `\Delta`{=tex}`\tilde `{=tex}i_A\^R(y),`\qquad`{=tex}
-`\Delta`{=tex}`\tilde `{=tex}i_i\^U(y),`\qquad`{=tex}
-`\Delta`{=tex}`\tilde `{=tex}i_A\^S(y) \]
-
+$$
+\Delta\tilde{i}_A^R(y),\qquad
+\Delta\tilde{i}_i^U(y),\qquad
+\Delta\tilde{i}_A^S(y)
+$$
 其中：
 
--   \(A\) 表示一个包含两个或更多变量的子集时，可对应冗余或协同项；
--   \(i\) 表示单个信息源；
+-   $A$ 表示一个包含两个或更多变量的子集时，可对应冗余或协同项；
+-   $i$ 表示单个信息源；
 -   实际 R/U/S 分配必须遵循 SURD 原论文定义的排序、增量和分配规则。
 
 **重要实现约束：不能用任意几个互信息相减，随意定义 R/U/S。**
@@ -352,17 +371,23 @@ check-in，不应仅凭这些分解声称发现了真实因果效应。
 
 对所有 POI 状态按目标先验加权：
 
-\[ `\Delta `{=tex}I_A\^R =
-`\sum`{=tex}\_{y`\in`{=tex}`\mathcal `{=tex}P}
-P(Y=y)`\Delta`{=tex}`\tilde `{=tex}i_A\^R(y) \]
+$$
+\Delta I_A^R =
+\sum_{y\in \mathcal{P}}
+P(Y=y)\Delta\tilde{i}_A^R(y)
+$$
 
-\[ `\Delta `{=tex}I_i\^U =
-`\sum`{=tex}\_{y`\in`{=tex}`\mathcal `{=tex}P}
-P(Y=y)`\Delta`{=tex}`\tilde `{=tex}i_i\^U(y) \]
+$$
+\Delta I_i^U =
+\sum_{y\in \mathcal{P}}
+P(Y=y)\Delta\tilde{i}_i^U(y)
+$$
 
-\[ `\Delta `{=tex}I_A\^S =
-`\sum`{=tex}\_{y`\in`{=tex}`\mathcal `{=tex}P}
-P(Y=y)`\Delta`{=tex}`\tilde `{=tex}i_A\^S(y) \]
+$$
+\Delta I_A^S =
+\sum_{y\in \mathcal{P}}
+P(Y=y)\Delta\tilde{i}_A^S(y)
+$$
 
 所以 SURD 并非只考虑全局。正确流程是：
 
@@ -430,19 +455,19 @@ Global SURD 汇总所有 POI 的平均信息结构，可用于：
 
 对每个目标 POI (y)，其 SURD 结果产生权重：
 
-\[ w_i\^U(y) = `\frac{\max(\Delta\tilde i_i^U(y),0)}`{=tex}
-{`\sum`{=tex}\_j`\max`{=tex}(`\Delta`{=tex}`\tilde `{=tex}i_j\^U(y),0)+`\epsilon`{=tex}}
-\]
+$$
+w_i^U(y) = \frac{\max(\Delta\tilde{i}_i^U(y),0)}{\sum_j\max(\Delta\tilde{i}_j^U(y),0)+\epsilon}
+$$
 
-\[ w_A\^S(y) = `\frac{\max(\Delta\tilde i_A^S(y),0)}`{=tex}
-{`\sum`{=tex}\_{B:\|B\|`\ge2`{=tex}}`\max`{=tex}(`\Delta`{=tex}`\tilde `{=tex}i_B\^S(y),0)+`\epsilon`{=tex}}
-\]
+$$
+w_A^S(y) = \frac{\max(\Delta\tilde{i}_A^S(y),0)}{\sum_{B:|B|\ge 2}\max(\Delta\tilde{i}_B^S(y),0)+\epsilon}
+$$
 
 可选冗余权重：
 
-\[ w_A\^R(y) = `\frac{\max(\Delta\tilde i_A^R(y),0)}`{=tex}
-{`\sum`{=tex}\_B`\max`{=tex}(`\Delta`{=tex}`\tilde `{=tex}i_B\^R(y),0)+`\epsilon`{=tex}}
-\]
+$$
+w_A^R(y) = \frac{\max(\Delta\tilde{i}_A^R(y),0)}{\sum_B\max(\Delta\tilde{i}_B^R(y),0)+\epsilon}
+$$
 
 说明：
 
@@ -456,13 +481,17 @@ Global SURD 汇总所有 POI 的平均信息结构，可用于：
 
 每个单变量分支输出：
 
-\[ `\hat `{=tex}P_i(Y`\mid `{=tex}Q_i) \]
+$$
+\hat{P}_i(Y\mid Q_i)
+$$
 
 训练样本 (n) 的真实目标 POI 是 (y_n)。使用该 POI 对应的 unique weight：
 
-\[ `\mathcal `{=tex}L_U = -`\frac`{=tex}1N `\sum`{=tex}\_{n=1}\^{N}
-`\sum`{=tex}\_i w_i\^U(y_n)
-`\log `{=tex}`\hat `{=tex}P_i(Y=y_n`\mid `{=tex}Q_i\^{(n)}) \]
+$$
+\mathcal{L}_U = -\frac{1}{N} \sum_{n=1}^{N}
+\sum_i w_i^U(y_n)
+\log \hat{P}_i(Y=y_n\mid Q_i^{(n)})
+$$
 
 解释：
 
@@ -475,13 +504,17 @@ Global SURD 汇总所有 POI 的平均信息结构，可用于：
 
 对多变量子集 (A) 建立组合预测 head：
 
-\[ `\hat `{=tex}P_A(Y`\mid `{=tex}Q_A) \]
+$$
+\hat{P}_A(Y\mid Q_A)
+$$
 
 定义：
 
-\[ `\mathcal `{=tex}L_S = -`\frac`{=tex}1N `\sum`{=tex}*{n=1}\^{N}
-`\sum`{=tex}*{A:\|A\|`\ge2`{=tex}} w_A\^S(y_n)
-`\log `{=tex}`\hat `{=tex}P_A(Y=y_n`\mid `{=tex}Q_A\^{(n)}) \]
+$$
+\mathcal{L}_S = -\frac{1}{N} \sum_{n=1}^{N}
+\sum_{A:|A|\ge 2} w_A^S(y_n)
+\log \hat{P}_A(Y=y_n\mid Q_A^{(n)})
+$$
 
 解释：
 
@@ -496,24 +529,26 @@ Global SURD 汇总所有 POI 的平均信息结构，可用于：
 
 第一版建议：
 
-\[ `\boxed{
-\mathcal L
+$$
+\boxed{
+\mathcal{L}
 =
-\mathcal L_{\mathrm{rec}}
+\mathcal{L}_{\mathrm{rec}}
 +
-\lambda_U\mathcal L_U
+\lambda_U\mathcal{L}_U
 +
-\lambda_S\mathcal L_S
-}`{=tex} \]
+\lambda_S\mathcal{L}_S
+}
+$$
 
 其中：
 
--   (`\mathcal `{=tex}L\_{`\mathrm{rec}`{=tex}})：主推荐损失；
--   (`\mathcal `{=tex}L_U)：POI-specific unique-weighted auxiliary
+-   $\mathcal{L}_{\mathrm{rec}}$：主推荐损失；
+-   $\mathcal{L}_U$：POI-specific unique-weighted auxiliary
     loss；
--   (`\mathcal `{=tex}L_S)：POI-specific synergy-weighted auxiliary
+-   $\mathcal{L}_S$：POI-specific synergy-weighted auxiliary
     loss；
--   (`\lambda`{=tex}\_U,`\lambda`{=tex}\_S)：验证集调节的超参数。
+-   $\lambda_U,\lambda_S$：验证集调节的超参数。
 
 初版不强制加入 redundancy loss。原因是预测信息冗余并不意味着 embedding
 应该正交；直接对不同 embedding
@@ -529,7 +564,9 @@ Global SURD 汇总所有 POI 的平均信息结构，可用于：
 
 不要直接使用：
 
-\[ \|h_i^`\top `{=tex}h_j\|^2 \]
+$$
+\|h_i^{\top} h_j\|^2
+$$
 
 并声称它等价于 SURD redundancy。两者不是同一个量。
 
@@ -575,7 +612,7 @@ MI 也会变化。若始终使用早期估计的 SURD 权重，指导信号可�
 2.  使用当前 (h_i) 训练/微调各子集概率 head。
 3.  在独立 calibration/estimation split 上获得每个子集对各 POI
     的条件概率。
-4.  计算 (`\widehat{\tilde i}`{=tex}(y;Q_A))。
+4.  计算 (\widehat{\tilde{i}}(y;Q_A))。
 5.  按正式 SURD 算法对每个 POI 做分解。
 6.  生成 POI-specific weights 和 global SURD。
 7.  将权重保存，并在下一阶段 stop-gradient / detach。
@@ -585,7 +622,7 @@ MI 也会变化。若始终使用早期估计的 SURD 权重，指导信号可�
 1.  固定当前 SURD weights。
 2.  更新共享 encoder 和 recommendation head。
 3.  同时使用
-    (`\mathcal `{=tex}L\_{`\mathrm{rec}`{=tex}})、(`\mathcal `{=tex}L_U)、(`\mathcal `{=tex}L_S)。
+    $\mathcal{L}_{\mathrm{rec}}$、$\mathcal{L}_U$、$\mathcal{L}_S$。
 4.  概率 heads 可冻结，避免同一轮中权重不断变化。
 5.  经过若干 epoch 后重新执行 Phase A。
 
@@ -598,12 +635,13 @@ MI 也会变化。若始终使用早期估计的 SURD 权重，指导信号可�
 -   两次 SURD 更新之间固定权重；
 -   使用 EMA 平滑权重：
 
-\[ `\bar `{=tex}w\^{(k)} = `\beta`{=tex}`\bar `{=tex}w\^{(k-1)} +
-(1-`\beta`{=tex})w\^{(k)} \]
+$$
+\bar{w}^{(k)} = \beta\bar{w}^{(k-1)} + (1-\beta)w^{(k)}
+$$
 
-其中 (k) 是 SURD 更新轮次，(`\beta`{=tex}````\in[0,1)\)。
+其中 $k$ 是 SURD 更新轮次，$\beta \in [0,1)$。
 
-具体 warm-up、\(T\)、\(\beta\) 作为超参数，通过验证集确定，不应在代码中写死为理论常数。
+具体 warm-up、$T$、$\beta$ 作为超参数，通过验证集确定，不应在代码中写死为理论常数。
 
 ## 7.3 防止 MI 高估与信息泄漏
 
@@ -622,13 +660,13 @@ MI 也会变化。若始终使用早期估计的 SURD 权重，指导信号可�
 
 ## 8.1 问题
 
-对于低频 POI \(y\)，样本数 \(N_y\) 很小：
+对于低频 POI $y$，样本数 $N_y$ 很小：
 
-\[
-\widehat{\tilde i}(y;Q_A)
+$$
+\widehat{\tilde{i}}(y;Q_A)
 =
-\frac1{N_y}\sum_{n:Y_n=y}\cdots
-\]
+\frac{1}{N_y}\sum_{n:Y_n=y}\cdots
+$$
 
 方差可能很大。因此不能因为某个 tail POI 的估计值特别高，就认定该信息源真的非常重要。
 
@@ -644,21 +682,21 @@ MI 也会变化。若始终使用早期估计的 SURD 权重，指导信号可�
 
 可进一步使用层次化收缩：
 
-\[
-\tilde w(y)
+$$
+\tilde{w}(y)
 =
 \rho_y w(y)
 +
 (1-\rho_y)w_{\mathrm{group}(y)}
-\]
+$$
 
 例如：
 
-\[
+$$
 \rho_y=\frac{N_y}{N_y+\kappa}
-\]
+$$
 
-其中 \(w_{\mathrm{group}(y)}\) 可以是同频率 bucket 的平均权重，\(\kappa\) 控制收缩程度。
+其中 $w_{\mathrm{group}(y)}$ 可以是同频率 bucket 的平均权重，$\kappa$ 控制收缩程度。
 
 注意：该公式是模型指导权重的稳定化策略，不是 SURD 原始理论公式。
 
@@ -668,34 +706,34 @@ MI 也会变化。若始终使用早期估计的 SURD 权重，指导信号可�
 
 **Population-weighted global SURD**
 
-\[
+$$
 \Delta I_{\mathrm{pop}}
 =
-\sum_yP(y)\Delta\tilde i(y)
-\]
+\sum_yP(y)\Delta\tilde{i}(y)
+$$
 
 代表真实总体目标分布下的平均信息结构。
 
 **POI-balanced summary**
 
-\[
+$$
 \Delta I_{\mathrm{balanced}}
 =
-\frac1{|\mathcal P|}
-\sum_y\Delta\tilde i(y)
-\]
+\frac{1}{|\mathcal{P}|}
+\sum_y\Delta\tilde{i}(y)
+$$
 
 每个 POI 权重相同，适合分析不同 POI 的平均结构，但它不等于总体互信息。
 
 **Tail-specific summary**
 
-\[
+$$
 \Delta I_{\mathrm{tail}}
 =
-\frac1{|\mathcal P_{\mathrm{tail}}|}
-\sum_{y\in\mathcal P_{\mathrm{tail}}}
-\Delta\tilde i(y)
-\]
+\frac{1}{|\mathcal{P}_{\mathrm{tail}}|}
+\sum_{y\in \mathcal{P}_{\mathrm{tail}}}
+\Delta\tilde{i}(y)
+$$
 
 用于分析 tail POI 的信息结构。必须同时报告 tail POI 的样本覆盖率和不确定性。
 
@@ -703,24 +741,24 @@ MI 也会变化。若始终使用早期估计的 SURD 权重，指导信号可�
 
 # 9. 推理阶段（Inference）
 
-推理阶段没有真实目标 POI \(y\)，因此不能根据真实标签查询 \(w(y)\) 再做预测。
+推理阶段没有真实目标 POI $y$，因此不能根据真实标签查询 $w(y)$ 再做预测。
 
 第一版采用最稳妥方案：
 
 1. 输入用户历史、时间和空间信息；
-2. 计算 \(h_1,\ldots,h_m\)；
+2. 计算 $h_1,\ldots,h_m$；
 3. 经过统一 recommendation fusion/head；
 4. 输出所有 POI 的概率；
 5. 返回 Top-K。
 
 即：
 
-\[
-\hat y
+$$
+\hat{y}
 =
 \arg\max_y
-\hat P_{\mathrm{rec}}(Y=y\mid Q_1,\ldots,Q_m)
-\]
+\hat{P}_{\mathrm{rec}}(Y=y\mid Q_1,\ldots,Q_m)
+$$
 
 POI-specific SURD 在第一版中只用于**训练期的辅助监督**，不依赖推理时的真实标签。
 
@@ -728,13 +766,13 @@ POI-specific SURD 在第一版中只用于**训练期的辅助监督**，不依�
 
 后续可以研究候选 POI 条件化的打分：
 
-\[
+$$
 s(y\mid Q)
 =
 g(h_1,\ldots,h_m; w(y))
-\]
+$$
 
-其中 \(w(y)\) 是训练阶段离线估计的候选 POI-specific 权重。推理时对每个候选 POI 使用其离线权重，而不是使用真实标签。
+其中 $w(y)$ 是训练阶段离线估计的候选 POI-specific 权重。推理时对每个候选 POI 使用其离线权重，而不是使用真实标签。
 
 但这会改变模型结构和推理成本，需作为独立扩展实验。不要把它与第一版训练期辅助监督混为一谈。
 
@@ -744,13 +782,13 @@ g(h_1,\ldots,h_m; w(y))
 
 ## 10.1 子集数量
 
-\(m\) 个信息源时，所有非空子集数量：
+$m$ 个信息源时，所有非空子集数量：
 
-\[
+$$
 2^m-1
-\]
+$$
 
-| 信息源数 \(m\) | 非空子集数 |
+| 信息源数 $m$ | 非空子集数 |
 |---:|---:|
 | 3 | 7 |
 | 4 | 15 |
@@ -863,8 +901,10 @@ h3 = spatial_encoder(spatial_inputs)
 所有输出 shape 为：
 
 ```text
-[B, hidden_dim]````{=tex}\`\`\`
+[B, hidden_dim]
+```
 
+## 12.3
 ## 12.3 Subset estimators
 
 输入一个子集及对应表示：
@@ -1103,7 +1143,7 @@ for epoch in range(total_epochs):
 -   w/o Synergy loss；
 -   仅一阶子集 vs 加入二阶/高阶组合；
 -   不同 SURD refresh interval；
--   不同 (`\lambda`{=tex}\_U,`\lambda`{=tex}\_S)；
+-   不同 $\lambda_U,\lambda_S$；
 -   不同低样本 POI 阈值和收缩强度。
 
 ## 15.3 指标
