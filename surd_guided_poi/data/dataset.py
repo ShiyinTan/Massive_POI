@@ -15,6 +15,23 @@ from .preprocessing import NextPOISample
 
 @dataclass
 class NextPOIBatch:
+    """Padded training-stage batch / 训练阶段一个 batch（张量）.
+
+    Shapes (B=batch, L=max history in batch)::
+
+        history_poi_ids      [B, L]      e.g. [[0, 3, PAD], [5, PAD, PAD]]
+        history_lengths      [B]         e.g. [2, 1]
+        history_mask         [B, L]      True = valid step
+        history_unix         [B, L]      Flashback time kernel (seconds)
+        history_coords       [B, L, 2]
+        target_time_features [B, 8]
+        spatial_features     [B, 12]
+        user_features        [B, ...]
+        target_poi_id        [B]         label Y
+        user_id              [B]
+        sample_id            [B]
+    """
+
     history_poi_ids: torch.Tensor  # [B, L]
     history_lengths: torch.Tensor  # [B]
     history_mask: torch.Tensor  # [B, L]
@@ -34,6 +51,8 @@ class NextPOIBatch:
 
 
 class NextPOIDataset(Dataset):
+    """Thin wrapper: index → ``NextPOISample`` (collate builds the batch)."""
+
     def __init__(self, samples: Sequence[NextPOISample]):
         self.samples = list(samples)
 
@@ -45,6 +64,14 @@ class NextPOIDataset(Dataset):
 
 
 def collate_next_poi(batch: List[NextPOISample]) -> NextPOIBatch:
+    """List[NextPOISample] → padded ``NextPOIBatch`` for the train loop.
+
+    Example / 示意 B=2::
+
+        samples[0].history_poi_ids = [0, 3]
+        samples[1].history_poi_ids = [5]
+        → history_poi_ids = tensor([[0, 3], [5, PAD]]), lengths = [2, 1]
+    """
     hist, lengths, mask = pad_history(batch)
     B, L = hist.shape
     unix = torch.zeros(B, L, dtype=torch.float32)

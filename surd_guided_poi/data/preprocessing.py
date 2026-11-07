@@ -35,8 +35,23 @@ class Vocab:
 
 @dataclass
 class NextPOISample:
+    """One supervised next-POI example / 一条训练样本（不是原始 check-in 行）.
+
+    Diff from raw CSV / 与原始 CSV 的差别：
+      raw: 多行轨迹 check-in
+      sample: 截取 history → 预测下一个 ``target_poi_id``
+
+    Toy example / 示意（trail 有 3 次打卡，预测第 3 次）::
+
+        history_poi_ids = [0, 3]          # vocab indices, not raw venue_id
+        history_unix    = [1577854800.0, 1577865600.0]
+        target_poi_id   = 5
+        target_time_features.shape = (8,)   # hour/dow/...
+        spatial_features.shape     = (12,)
+    """
+
     sample_id: int
-    user_id: int
+    user_id: int  # vocab user index
     trail_id: str
     history_poi_ids: List[int]
     history_timestamps: List[pd.Timestamp]
@@ -194,11 +209,22 @@ def build_samples_from_split(
     use_all_prefixes: bool = True,
     user_history_df: Optional[pd.DataFrame] = None,
 ) -> List[NextPOISample]:
-    """
-    Construct next-POI samples from one official Massive-STEPS split CSV.
+    """CSV rows → list[NextPOISample] for one official split.
 
-    Trail grouping matches Flashback: ``groupby([user_id, trail_id])``,
-    require length >= 2. Spec sample = history before t → target POI at t.
+    Grouping / 分组: ``groupby([user_id, trail_id])`` (same as Flashback).
+
+    Length rules / 长度规则（默认 config）::
+
+        min_history_len = 1   # need ≥1 history POI → trail needs ≥2 check-ins
+        max_history_len = 20  # truncate history to last 20 (NOT a user filter)
+
+    Does **not** drop users whose total check-ins < 20.
+
+    Toy trail (3 check-ins) with ``use_all_prefixes=True`` → 2 samples::
+
+        check-ins: [vA, vB, vC]
+        sample0: history=[vA]     → target=vB
+        sample1: history=[vA,vB]  → target=vC
     """
     samples: List[NextPOISample] = []
     sid = 0
