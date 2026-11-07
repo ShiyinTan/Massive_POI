@@ -1,4 +1,4 @@
-"""PyTorch Dataset / collate for next-POI samples."""
+"""PyTorch Dataset / collate for next-POI samples (Flashback-compatible fields)."""
 
 from __future__ import annotations
 
@@ -9,15 +9,17 @@ import numpy as np
 import torch
 from torch.utils.data import Dataset
 
-from .feature_builder import SPATIAL_FEATURE_DIM, TIME_FEATURE_DIM, USER_FEATURE_DIM, pad_history
+from .feature_builder import pad_history
 from .preprocessing import NextPOISample
 
 
 @dataclass
 class NextPOIBatch:
-    history_poi_ids: torch.Tensor
-    history_lengths: torch.Tensor
-    history_mask: torch.Tensor
+    history_poi_ids: torch.Tensor  # [B, L]
+    history_lengths: torch.Tensor  # [B]
+    history_mask: torch.Tensor  # [B, L]
+    history_unix: torch.Tensor  # [B, L] Flashback temporal kernel
+    history_coords: torch.Tensor  # [B, L, 2]
     target_time_features: torch.Tensor
     spatial_features: torch.Tensor
     user_features: torch.Tensor
@@ -44,10 +46,23 @@ class NextPOIDataset(Dataset):
 
 def collate_next_poi(batch: List[NextPOISample]) -> NextPOIBatch:
     hist, lengths, mask = pad_history(batch)
+    B, L = hist.shape
+    unix = torch.zeros(B, L, dtype=torch.float32)
+    coords = torch.zeros(B, L, 2, dtype=torch.float32)
+    for i, s in enumerate(batch):
+        h = s.history_unix[-L:]
+        unix[i, : len(h)] = torch.tensor(h, dtype=torch.float32)
+        la = s.history_lats[-L:]
+        lo = s.history_lons[-L:]
+        for j, (a, b) in enumerate(zip(la, lo)):
+            coords[i, j, 0] = 0.0 if (isinstance(a, float) and np.isnan(a)) else float(a)
+            coords[i, j, 1] = 0.0 if (isinstance(b, float) and np.isnan(b)) else float(b)
     return NextPOIBatch(
         history_poi_ids=hist,
         history_lengths=lengths,
         history_mask=mask,
+        history_unix=unix,
+        history_coords=coords,
         target_time_features=torch.tensor(
             np.stack([s.target_time_features for s in batch], axis=0), dtype=torch.float32
         ),

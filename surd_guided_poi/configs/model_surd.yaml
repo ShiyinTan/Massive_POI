@@ -1,8 +1,11 @@
-# SURD-guided training overlay (keeps 3 sources; no Q4).
 model:
+  backbone: flashback
   hidden_dim: 64
-  poi_emb_dim: 64
   subset_hidden_dim: 64
+  rnn_type: gru
+  lambda_t: 0.1
+  lambda_s: 100.0
+  share_poi_embedding: true
 
 train:
   lambda_u: 0.5

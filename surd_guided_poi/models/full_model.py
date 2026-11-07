@@ -1,4 +1,4 @@
-"""Full SURD-guided next-POI model: shared encoders + rec head + subset heads."""
+"""SURD-guided next-POI model: Flashback backbone + SURD subset heads."""
 
 from __future__ import annotations
 
@@ -9,41 +9,62 @@ import torch.nn as nn
 
 from ..data.dataset import NextPOIBatch
 from ..data.feature_builder import SPATIAL_FEATURE_DIM, TIME_FEATURE_DIM
+from .backbone_flashback import FlashbackBackbone
 from .encoders import HistoryEncoder, SpatialEncoder, TemporalEncoder
-from .recommendation import RecommendationHead
 from .subset_estimators import SOURCE_NAMES, SubsetEstimators
 
 
 class SURDGuidedPOIModel(nn.Module):
+    """
+    Recommendation logits: Massive-STEPS Flashback backbone.
+    SURD sources Q1/Q2/Q3: side encoders (Q1 shares Flashback POI embedding).
+    Subset heads: Specific MI / SURD guidance only (not used at inference).
+    """
+
     def __init__(
         self,
         num_pois: int,
+        num_users: int,
         hidden_dim: int = 64,
         poi_emb_dim: int = 64,
         num_layers_history: int = 1,
         subset_hidden_dim: int = 64,
         dropout: float = 0.1,
+        rnn_type: str = "gru",
+        lambda_t: float = 0.1,
+        lambda_s: float = 100.0,
+        share_poi_embedding: bool = True,
     ):
         super().__init__()
         self.num_pois = num_pois
+        self.num_users = num_users
         self.hidden_dim = hidden_dim
         self.source_names = SOURCE_NAMES
 
-        self.history_encoder = HistoryEncoder(
+        self.backbone = FlashbackBackbone(
             num_pois=num_pois,
-            emb_dim=poi_emb_dim,
+            num_users=num_users,
+            hidden_dim=hidden_dim,
+            rnn_type=rnn_type,
+            lambda_t=lambda_t,
+            lambda_s=lambda_s,
+        )
+        shared = self.backbone.location_embedding if share_poi_embedding else None
+        # Flashback embedding is (num_pois+1) with padding_idx=num_pois.
+        self.history_encoder = HistoryEncoder(
+            num_pois=num_pois + 1,
+            emb_dim=poi_emb_dim if shared is None else shared.embedding_dim,
             hidden_dim=hidden_dim,
             num_layers=num_layers_history,
             dropout=dropout,
+            padding_idx=num_pois,
+            shared_embedding=shared,
         )
         self.temporal_encoder = TemporalEncoder(
             in_dim=TIME_FEATURE_DIM, hidden_dim=hidden_dim, dropout=dropout
         )
         self.spatial_encoder = SpatialEncoder(
             in_dim=SPATIAL_FEATURE_DIM, hidden_dim=hidden_dim, dropout=dropout
-        )
-        self.recommendation = RecommendationHead(
-            hidden_dim=hidden_dim, num_pois=num_pois, num_sources=3, dropout=dropout
         )
         self.subset_estimators = SubsetEstimators(
             hidden_dim=hidden_dim,
@@ -52,18 +73,21 @@ class SURDGuidedPOIModel(nn.Module):
             dropout=dropout,
         )
 
-    def encode(self, batch: NextPOIBatch) -> list[torch.Tensor]:
+    def encode_sources(self, batch: NextPOIBatch) -> list[torch.Tensor]:
         h1 = self.history_encoder(batch.history_poi_ids, batch.history_lengths, batch.history_mask)
         h2 = self.temporal_encoder(batch.target_time_features)
         h3 = self.spatial_encoder(batch.spatial_features)
         return [h1, h2, h3]
 
+    # Alias used by trainer Phase A
+    def encode(self, batch: NextPOIBatch) -> list[torch.Tensor]:
+        return self.encode_sources(batch)
+
     def forward(self, batch: NextPOIBatch, compute_subsets: bool = True) -> Dict[str, object]:
-        hs = self.encode(batch)
-        rec_logits, h_rec = self.recommendation(hs)
+        rec_logits, _, _ = self.backbone(batch)
+        hs = self.encode_sources(batch)
         out: Dict[str, object] = {
             "rec_logits": rec_logits,
-            "h_rec": h_rec,
             "source_hs": hs,
             "h1": hs[0],
             "h2": hs[1],
@@ -77,7 +101,6 @@ class SURDGuidedPOIModel(nn.Module):
         return out
 
     def recommend(self, batch: NextPOIBatch) -> torch.Tensor:
-        """Inference path: unified recommendation head only (no label-dependent weights)."""
-        hs = self.encode(batch)
-        logits, _ = self.recommendation(hs)
+        """Inference: Flashback backbone only (no label-dependent SURD weights)."""
+        logits, _, _ = self.backbone(batch)
         return logits

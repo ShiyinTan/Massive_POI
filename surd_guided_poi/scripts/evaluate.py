@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Evaluate a trained checkpoint on the temporal test split."""
+"""Evaluate a checkpoint on Massive-STEPS official test split."""
 
 from __future__ import annotations
 
@@ -7,7 +7,6 @@ import argparse
 import sys
 from pathlib import Path
 
-import numpy as np
 import torch
 from torch.utils.data import DataLoader
 
@@ -17,13 +16,12 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from surd_guided_poi.data.dataset import NextPOIDataset, collate_next_poi
+from surd_guided_poi.data.massive_steps import load_official_split_frames
 from surd_guided_poi.data.preprocessing import (
-    build_samples,
-    build_vocab,
-    load_checkins,
+    build_samples_from_split,
+    build_vocab_from_frames,
     poi_sample_counts,
 )
-from surd_guided_poi.data.splits import temporal_split_samples
 from surd_guided_poi.evaluation.long_tail_metrics import evaluate_by_frequency, frequency_buckets
 from surd_guided_poi.evaluation.ranking_metrics import evaluate_ranking
 from surd_guided_poi.models.full_model import SURDGuidedPOIModel
@@ -35,59 +33,68 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", nargs="+", default=["configs/base.yaml", "configs/dataset_beijing.yaml"])
     parser.add_argument("--checkpoint", required=True)
-    parser.add_argument("--checkins_csv", default=None)
+    parser.add_argument("--data_dir", default=None)
     parser.add_argument("--output_json", default="outputs/eval_metrics.json")
     args = parser.parse_args()
 
     cfg_paths = [Path(c) if Path(c).is_file() else PKG_ROOT / c for c in args.config]
     cfg = load_config(cfg_paths)
-    if args.checkins_csv:
-        cfg["data"]["checkins_csv"] = args.checkins_csv
+    if args.data_dir:
+        cfg["data"]["data_dir"] = args.data_dir
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     data_cfg = cfg["data"]
-    df = load_checkins(
-        checkins_csv=data_cfg.get("checkins_csv"),
+    city = data_cfg["city"]
+    cache_dir = PKG_ROOT / data_cfg.get("cache_dir", "outputs/data_cache") / city
+    frames = load_official_split_frames(
+        city,
+        data_dir=data_cfg.get("data_dir"),
+        cache_dir=cache_dir,
         hf_dataset_id=data_cfg.get("hf_dataset_id"),
-        hf_filename=data_cfg.get("hf_filename"),
-        cache_dir=str(PKG_ROOT / data_cfg.get("cache_dir", "outputs/data_cache")),
     )
-    vocab = build_vocab(df)
-    samples = build_samples(
-        df,
+    vocab = build_vocab_from_frames(frames)
+    train_samples = build_samples_from_split(
+        frames["train"],
         vocab,
+        "train",
         max_history_len=int(data_cfg["max_history_len"]),
         min_history_len=int(data_cfg["min_history_len"]),
         use_all_prefixes=bool(data_cfg["use_all_prefixes"]),
     )
-    splits = temporal_split_samples(
-        samples,
-        train_ratio=float(data_cfg["train_ratio"]),
-        val_ratio=float(data_cfg["val_ratio"]),
-        test_ratio=float(data_cfg["test_ratio"]),
+    test_samples = build_samples_from_split(
+        frames["test"],
+        vocab,
+        "test",
+        max_history_len=int(data_cfg["max_history_len"]),
+        min_history_len=int(data_cfg["min_history_len"]),
+        use_all_prefixes=bool(data_cfg["use_all_prefixes"]),
     )
-    train_counts = poi_sample_counts(splits["train"], vocab.num_pois)
+    train_counts = poi_sample_counts(train_samples, vocab.num_pois)
 
+    model_cfg = cfg["model"]
     model = SURDGuidedPOIModel(
         num_pois=vocab.num_pois,
-        hidden_dim=int(cfg["model"]["hidden_dim"]),
-        poi_emb_dim=int(cfg["model"]["poi_emb_dim"]),
-        num_layers_history=int(cfg["model"]["num_layers_history"]),
-        subset_hidden_dim=int(cfg["model"]["subset_hidden_dim"]),
-        dropout=float(cfg["model"]["dropout"]),
+        num_users=vocab.num_users,
+        hidden_dim=int(model_cfg["hidden_dim"]),
+        poi_emb_dim=int(model_cfg.get("poi_emb_dim", model_cfg["hidden_dim"])),
+        subset_hidden_dim=int(model_cfg.get("subset_hidden_dim", model_cfg["hidden_dim"])),
+        dropout=float(model_cfg.get("dropout", 0.1)),
+        rnn_type=str(model_cfg.get("rnn_type", "gru")),
+        lambda_t=float(model_cfg.get("lambda_t", 0.1)),
+        lambda_s=float(model_cfg.get("lambda_s", 100.0)),
+        share_poi_embedding=bool(model_cfg.get("share_poi_embedding", True)),
     )
     load_checkpoint(args.checkpoint, model, map_location=device)
     model.to(device)
 
     test_loader = DataLoader(
-        NextPOIDataset(splits["test"]),
+        NextPOIDataset(test_samples),
         batch_size=int(cfg["train"]["batch_size"]),
         shuffle=False,
         collate_fn=collate_next_poi,
     )
     metrics = evaluate_ranking(model, test_loader, device, ks=cfg["eval"]["ks"])
 
-    # Long-tail breakdown
     model.eval()
     logits_list, tgt_list = [], []
     with torch.no_grad():
@@ -100,7 +107,7 @@ def main():
     buckets = frequency_buckets(train_counts, cutoffs=cfg["eval"]["frequency_buckets"])
     long_tail = evaluate_by_frequency(logits, targets, buckets["poi_bucket"], ks=cfg["eval"]["ks"])
 
-    result = {"ranking": metrics, "long_tail": long_tail}
+    result = {"ranking": metrics, "long_tail": long_tail, "split_protocol": "massive_steps_official"}
     out = Path(args.output_json)
     if not out.is_absolute():
         out = PKG_ROOT / out

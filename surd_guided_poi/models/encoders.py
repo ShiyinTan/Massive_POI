@@ -1,4 +1,9 @@
-"""Three information-source encoders (Q1 history, Q2 temporal, Q3 spatial)."""
+"""SURD information-source encoders (Q1/Q2/Q3) on Massive-STEPS fields.
+
+These are *side* encoders used by subset probability heads for Specific MI /
+SURD. The main recommendation logits come from the Flashback backbone.
+Q1 can optionally share Flashback's location embedding.
+"""
 
 from __future__ import annotations
 
@@ -7,7 +12,7 @@ import torch.nn as nn
 
 
 class HistoryEncoder(nn.Module):
-    """Q1: POI embedding + GRU over the user history sequence."""
+    """Q1: personal preference / history from the POI sequence."""
 
     def __init__(
         self,
@@ -17,11 +22,17 @@ class HistoryEncoder(nn.Module):
         num_layers: int = 1,
         dropout: float = 0.1,
         padding_idx: int | None = None,
+        shared_embedding: nn.Embedding | None = None,
     ):
         super().__init__()
-        self.emb = nn.Embedding(num_pois, emb_dim, padding_idx=padding_idx)
+        if shared_embedding is not None:
+            self.emb = shared_embedding
+            self._owns_emb = False
+        else:
+            self.emb = nn.Embedding(num_pois, emb_dim, padding_idx=padding_idx)
+            self._owns_emb = True
         self.gru = nn.GRU(
-            input_size=emb_dim,
+            input_size=self.emb.embedding_dim,
             hidden_size=hidden_dim,
             num_layers=num_layers,
             batch_first=True,
@@ -31,7 +42,6 @@ class HistoryEncoder(nn.Module):
         self.dropout = nn.Dropout(dropout)
 
     def forward(self, poi_ids: torch.Tensor, lengths: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
-        # poi_ids: [B, L], lengths: [B], mask: [B, L]
         x = self.dropout(self.emb(poi_ids))
         lengths_cpu = lengths.clamp(min=1).cpu()
         packed = nn.utils.rnn.pack_padded_sequence(
@@ -39,7 +49,6 @@ class HistoryEncoder(nn.Module):
         )
         _, h_n = self.gru(packed)
         h = h_n[-1]
-        # Zero-out empty histories (should be rare given min_history_len).
         empty = lengths == 0
         if empty.any():
             h = h.clone()
@@ -48,7 +57,7 @@ class HistoryEncoder(nn.Module):
 
 
 class TemporalEncoder(nn.Module):
-    """Q2: hour / weekday / periodic time features -> MLP."""
+    """Q2: temporal context from target-time features."""
 
     def __init__(self, in_dim: int = 8, hidden_dim: int = 64, dropout: float = 0.1):
         super().__init__()
@@ -64,7 +73,7 @@ class TemporalEncoder(nn.Module):
 
 
 class SpatialEncoder(nn.Module):
-    """Q3: history location statistics / distances -> MLP."""
+    """Q3: spatial context from history location statistics."""
 
     def __init__(self, in_dim: int = 12, hidden_dim: int = 64, dropout: float = 0.1):
         super().__init__()

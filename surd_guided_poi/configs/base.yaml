@@ -4,31 +4,35 @@ output_dir: outputs/default
 
 data:
   city: beijing
-  # Local CSV (preferred if present). Relative paths resolve from repo root or this package.
-  checkins_csv: null
-  # HuggingFace dataset id; used when checkins_csv is missing.
+  # Directory containing Massive-STEPS official split CSVs:
+  #   {city}_checkins_train.csv / _validation.csv / _test.csv
+  # If null, tries Massive-STEPS/data/{city}/ then HuggingFace download.
+  data_dir: null
   hf_dataset_id: CRUISEResearchGroup/Massive-STEPS-Beijing
-  hf_filename: beijing_checkins.csv
   cache_dir: outputs/data_cache
-  # Temporal split ratios on target check-in timestamps (no future leakage).
-  train_ratio: 0.7
-  val_ratio: 0.1
-  test_ratio: 0.2
-  # From train period only: fraction held out for MI/SURD estimation (cross-fitting).
+  # Official Massive-STEPS protocol (trail-level, user-stratified). Do not replace
+  # with a custom global temporal split.
+  split_protocol: massive_steps_official
+  # From official train only: holdout for MI/SURD estimation (cross-fitting).
   estimator_holdout_ratio: 0.2
   max_history_len: 20
   min_history_len: 1
-  # Use every prefix within a trail as a sample (True) or only the last check-in (False).
+  # Flashback trains on all prefixes; Massive-STEPS LLM eval often uses last only.
   use_all_prefixes: true
-  # Transductive: POI vocab built from all check-ins before temporal labels are used.
   setting: transductive
 
 model:
+  backbone: flashback
   hidden_dim: 64
-  poi_emb_dim: 64
+  poi_emb_dim: 64  # ignored when share_poi_embedding=true (Flashback emb dim = hidden_dim)
   num_layers_history: 1
   dropout: 0.1
   subset_hidden_dim: 64
+  rnn_type: gru
+  # Flashback spatiotemporal decay (Massive-STEPS/Flashback defaults)
+  lambda_t: 0.1
+  lambda_s: 100.0
+  share_poi_embedding: true
 
 train:
   batch_size: 64
@@ -48,12 +52,10 @@ train:
 
 surd:
   eps: 1.0e-12
-  # Minimum target-POI samples on the estimation split before trusting POI-specific weights.
   min_poi_samples: 3
   shrink_kappa: 10.0
-  # Units for specific MI / SURD logs: "nats" (ln) or "bits" (log2). Must stay consistent.
   units: nats
 
 eval:
   ks: [1, 5, 10]
-  frequency_buckets: [0.2, 0.5]  # cumulative frequency cutoffs -> head / mid / tail
+  frequency_buckets: [0.2, 0.5]

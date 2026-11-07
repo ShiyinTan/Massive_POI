@@ -64,11 +64,19 @@ class AlternatingSURDTrainer:
         self.history = []
 
     def _rec_parameters(self):
-        # Encoders + recommendation head; subset heads updated in Phase A separately.
-        params = list(self.model.history_encoder.parameters())
-        params += list(self.model.temporal_encoder.parameters())
-        params += list(self.model.spatial_encoder.parameters())
-        params += list(self.model.recommendation.parameters())
+        """Flashback backbone + SURD side encoders (not subset heads)."""
+        params = list(self.model.backbone.parameters())
+        # Side encoders may share Flashback POI embedding; dedupe by id.
+        seen = {id(p) for p in params}
+        for module in (
+            self.model.history_encoder,
+            self.model.temporal_encoder,
+            self.model.spatial_encoder,
+        ):
+            for p in module.parameters():
+                if id(p) not in seen:
+                    params.append(p)
+                    seen.add(id(p))
         return params
 
     def _subset_parameters(self):

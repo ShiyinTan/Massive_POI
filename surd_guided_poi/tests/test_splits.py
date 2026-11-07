@@ -1,14 +1,14 @@
-"""Temporal split leakage checks."""
+"""Official-split and estimator-holdout checks."""
 
 from __future__ import annotations
 
 from datetime import datetime, timedelta
 
+import numpy as np
 import pandas as pd
 
 from surd_guided_poi.data.preprocessing import NextPOISample
-import numpy as np
-from surd_guided_poi.data.splits import carve_estimator_holdout, temporal_split_samples
+from surd_guided_poi.data.splits import assert_official_split_disjoint_trails, carve_estimator_holdout
 
 
 def _s(i: int, day: int) -> NextPOISample:
@@ -21,33 +21,42 @@ def _s(i: int, day: int) -> NextPOISample:
         history_timestamps=[ts - timedelta(hours=1)],
         history_lats=[0.0],
         history_lons=[0.0],
+        history_unix=[float(ts.value // 10**9) - 3600],
         target_poi_id=1,
         target_timestamp=ts,
         target_time_features=np.zeros(8, dtype=np.float32),
         spatial_features=np.zeros(12, dtype=np.float32),
         user_features=np.zeros(6, dtype=np.float32),
+        split="train",
     )
 
 
-def test_temporal_split_ordering():
+def test_estimator_holdout_inside_train_only():
     samples = [_s(i, i) for i in range(20)]
-    splits = temporal_split_samples(samples, 0.7, 0.1, 0.2)
-    train_max = max(s.target_timestamp for s in splits["train"])
-    val_min = min(s.target_timestamp for s in splits["val"])
-    val_max = max(s.target_timestamp for s in splits["val"])
-    test_min = min(s.target_timestamp for s in splits["test"])
-    assert train_max <= val_min
-    assert val_max <= test_min
-
-
-def test_estimator_holdout_inside_train_period():
-    samples = [_s(i, i) for i in range(20)]
-    splits = temporal_split_samples(samples, 0.7, 0.1, 0.2)
-    model_train, estimation = carve_estimator_holdout(splits["train"], 0.2)
+    model_train, estimation = carve_estimator_holdout(samples, 0.2)
     assert model_train and estimation
     assert max(s.target_timestamp for s in model_train) <= min(
         s.target_timestamp for s in estimation
     )
-    assert max(s.target_timestamp for s in estimation) <= max(
-        s.target_timestamp for s in splits["train"]
-    )
+
+
+def test_official_trails_disjoint():
+    frames = {
+        "train": pd.DataFrame({"trail_id": ["a", "b"]}),
+        "val": pd.DataFrame({"trail_id": ["c"]}),
+        "test": pd.DataFrame({"trail_id": ["d", "e"]}),
+    }
+    assert_official_split_disjoint_trails(frames)
+
+
+def test_official_trails_overlap_raises():
+    frames = {
+        "train": pd.DataFrame({"trail_id": ["a", "b"]}),
+        "val": pd.DataFrame({"trail_id": ["b"]}),
+        "test": pd.DataFrame({"trail_id": ["c"]}),
+    }
+    try:
+        assert_official_split_disjoint_trails(frames)
+        assert False, "expected assertion"
+    except AssertionError:
+        pass

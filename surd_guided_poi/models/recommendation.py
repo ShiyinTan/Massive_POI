@@ -1,4 +1,7 @@
-"""Unified recommendation fusion + classification head (inference path)."""
+"""Legacy concat+MLP recommendation head (kept for ablations / tests only).
+
+Production recommendation uses ``FlashbackBackbone`` in ``full_model.py``.
+"""
 
 from __future__ import annotations
 
@@ -7,8 +10,6 @@ import torch.nn as nn
 
 
 class RecommendationHead(nn.Module):
-    """Concat + MLP fusion of (h1,h2,h3) then linear POI classifier."""
-
     def __init__(self, hidden_dim: int, num_pois: int, num_sources: int = 3, dropout: float = 0.1):
         super().__init__()
         in_dim = hidden_dim * num_sources
