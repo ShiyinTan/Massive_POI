@@ -55,14 +55,14 @@ def estimate_specific_mi(
         if p.shape != (N, K):
             raise ValueError(f"{key}: expected probs shape {(N, K)}, got {p.shape}")
         p = np.clip(p, eps, 1.0)
-        # Per-sample log-ratio for the *true* class only.
+        # 只看真实标签那一格的概率：log P_A(y|Q_A) − log P(y)
         p_true = p[np.arange(N), labels]
         log_ratio = np_log(p_true) - np_log(prior[labels])
         mi = np.zeros(K, dtype=np.float64)
         for y in np.unique(labels):
             mask = labels == y
-            mi[y] = float(log_ratio[mask].mean())
-        # POIs never observed on estimation split keep 0 (marked unreliable via counts).
+            mi[y] = float(log_ratio[mask].mean())  # 对「下一站是 y」的样本取平均
+        # 估计集上没出现过的 POI 保持 0
         specific[key] = mi
     return specific, counts
 

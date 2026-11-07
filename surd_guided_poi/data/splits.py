@@ -19,20 +19,16 @@ def carve_estimator_holdout(
     train_samples: Sequence[NextPOISample],
     holdout_ratio: float = 0.2,
 ) -> Tuple[List[NextPOISample], List[NextPOISample]]:
-    """
-    Split official-train samples into model-train vs MI/SURD estimation.
-
-    Holdout is taken from later timestamps *within train only* so val/test
-    official labels never enter SURD estimation.
-    """
+    """只在 official-train 里再切一块：前面训模型，后面估 SURD（避免同一批又训又估）。"""
     if not train_samples:
         return [], []
+    # 按目标时间排序，取较晚的一段当 estimation holdout
     ordered = sorted(train_samples, key=lambda s: (s.target_timestamp, s.sample_id))
     n = len(ordered)
     n_est = max(1, int(round(n * holdout_ratio))) if n >= 5 else max(1, n // 5)
     n_est = min(n_est, n - 1) if n > 1 else 0
-    model_train = list(ordered[: n - n_est])
-    estimation = list(ordered[n - n_est :])
+    model_train = list(ordered[: n - n_est])  # 真正更新推荐模型的样本
+    estimation = list(ordered[n - n_est :])  # 只用来算 Specific MI / SURD
     return model_train, estimation
 
 
