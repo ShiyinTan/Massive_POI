@@ -15,10 +15,11 @@ from .subset_estimators import SOURCE_NAMES, SubsetEstimators
 
 
 class SURDGuidedPOIModel(nn.Module):
-    """
-    Recommendation logits: Massive-STEPS Flashback backbone.
-    SURD sources Q1/Q2/Q3: side encoders (Q1 shares Flashback POI embedding).
-    Subset heads: Specific MI / SURD guidance only (not used at inference).
+    """Flashback recommendation + side encoders / subset heads for SURD.
+
+    * ``recommend`` / ``rec_logits`` — Flashback only (inference path).
+    * Q1/Q2/Q3 encoders + 7 subset heads — Specific MI / U/S auxiliary training.
+    * Q1 may share Flashback's POI embedding when ``share_poi_embedding=True``.
     """
 
     def __init__(
@@ -49,16 +50,17 @@ class SURDGuidedPOIModel(nn.Module):
             lambda_t=lambda_t,
             lambda_s=lambda_s,
         )
-        shared = self.backbone.location_embedding if share_poi_embedding else None
-        # Flashback embedding is (num_pois+1) with padding_idx=num_pois.
+
+        # Flashback embedding is (num_pois + 1) with padding_idx = num_pois.
+        shared_emb = self.backbone.location_embedding if share_poi_embedding else None
         self.history_encoder = HistoryEncoder(
             num_pois=num_pois + 1,
-            emb_dim=poi_emb_dim if shared is None else shared.embedding_dim,
+            emb_dim=poi_emb_dim if shared_emb is None else shared_emb.embedding_dim,
             hidden_dim=hidden_dim,
             num_layers=num_layers_history,
             dropout=dropout,
             padding_idx=num_pois,
-            shared_embedding=shared,
+            shared_embedding=shared_emb,
         )
         self.temporal_encoder = TemporalEncoder(
             in_dim=TIME_FEATURE_DIM, hidden_dim=hidden_dim, dropout=dropout
@@ -74,13 +76,14 @@ class SURDGuidedPOIModel(nn.Module):
         )
 
     def encode_sources(self, batch: NextPOIBatch) -> list[torch.Tensor]:
+        """Q1 history, Q2 time, Q3 space — used only for SURD subset heads."""
         h1 = self.history_encoder(batch.history_poi_ids, batch.history_lengths, batch.history_mask)
         h2 = self.temporal_encoder(batch.target_time_features)
         h3 = self.spatial_encoder(batch.spatial_features)
         return [h1, h2, h3]
 
-    # Alias used by trainer Phase A
     def encode(self, batch: NextPOIBatch) -> list[torch.Tensor]:
+        """Alias for Phase-A trainer code."""
         return self.encode_sources(batch)
 
     def forward(self, batch: NextPOIBatch, compute_subsets: bool = True) -> Dict[str, object]:
@@ -101,6 +104,6 @@ class SURDGuidedPOIModel(nn.Module):
         return out
 
     def recommend(self, batch: NextPOIBatch) -> torch.Tensor:
-        """Inference: Flashback backbone only (no label-dependent SURD weights)."""
+        """Inference: Flashback only (no label-dependent SURD weights)."""
         logits, _, _ = self.backbone(batch)
         return logits
