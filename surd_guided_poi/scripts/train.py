@@ -153,6 +153,7 @@ def main():
     val_samples = build_split_samples(frames["val"], vocab, "val", data_cfg)
     test_samples = build_split_samples(frames["test"], vocab, "test", data_cfg)
 
+    # carve：train 内再切 — model_train 训推荐；estimation 只给 Phase A 估 SURD
     model_train, estimation = carve_estimator_holdout(
         train_samples, holdout_ratio=float(data_cfg["estimator_holdout_ratio"])
     )
@@ -185,9 +186,9 @@ def main():
 
     loaders = build_loaders(
         {
-            "train": model_train,
-            "estimator_fit": model_train,
-            "estimation": estimation,
+            "train": model_train,  # 推荐主训
+            "estimator_fit": model_train,  # Phase A：在这批上拟合子集头
+            "estimation": estimation,  # Phase A：在 holdout 上估 MI/SURD（不反传）
             "val": val_samples,
             "test": test_samples,
         },
@@ -201,7 +202,7 @@ def main():
         train_loader=loaders["train"],
         val_loader=loaders["val"],
         estimator_fit_loader=loaders["estimator_fit"],
-        estimation_loader=loaders["estimation"],
+        estimation_loader=loaders["estimation"],  # 来自 carve 的 holdout
         poi_prior=poi_prior,
         config=cfg,
         device=device,

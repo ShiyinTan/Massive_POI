@@ -32,6 +32,7 @@ def _s(i: int, day: int) -> NextPOISample:
 
 
 def test_estimator_holdout_inside_train_only():
+    # estimation 应整体晚于 model_train（按 target_timestamp）
     samples = [_s(i, i) for i in range(20)]
     model_train, estimation = carve_estimator_holdout(samples, 0.2)
     assert model_train and estimation
