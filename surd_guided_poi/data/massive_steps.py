@@ -12,6 +12,16 @@ Conventions match ``Massive-STEPS/Flashback`` / ``GETNext``:
 * Official files: ``{city}_checkins_{train,validation,test}.csv``
   (trail-level ~7:1:2, user_id-stratified)
 * Missing venue lat/lon filled from city-center columns
+
+Raw CSV row example / 原始 CSV 一行（示意）::
+
+    trail_id,user_id,venue_id,timestamp,latitude,longitude,venue_city_latitude,...
+    t_01,U7,101,2020-01-01 09:00:00,, ,39.9,116.4,...
+
+Length filter note / 长度过滤说明：
+  Default SURD path does **not** drop users with <20 check-ins.
+  ``max_history_len=20`` only **truncates** history windows.
+  Trails shorter than ``min_history_len+1`` (default 2 rows) are skipped per trail.
 """
 
 from __future__ import annotations
@@ -170,7 +180,24 @@ def load_official_split_frames(
     cache_dir: Optional[str | Path] = None,
     hf_dataset_id: Optional[str] = None,
 ) -> Dict[str, pd.DataFrame]:
-    """Load and normalize the three official Massive-STEPS split CSVs."""
+    """Load and normalize the three official Massive-STEPS split CSVs.
+
+    Returns / 返回::
+
+        {
+          "train": DataFrame(...),  # same for "val", "test"
+        }
+
+    After load (示意) — still **one row = one check-in**, not yet a training sample::
+
+        user_id  trail_id  venue_id  timestamp            latitude  longitude
+        U7       t_01      101       2020-01-01 09:00:00   39.90     116.40
+        U7       t_01      205       2020-01-01 12:00:00   39.91     116.41
+
+    Changes vs raw CSV: parse timestamps; fill missing lat/lon from city center;
+    drop NaN required fields; sort by (user_id, trail_id, timestamp).
+    No user-level ``sequence_length < 20`` filter here.
+    """
     paths = resolve_official_splits(
         city, data_dir=data_dir, cache_dir=cache_dir, hf_dataset_id=hf_dataset_id
     )
@@ -185,12 +212,14 @@ def load_flashback_poi_dataloader(
     max_users: int = 0,
     min_checkins: int = 0,
 ):
-    """Optional: build Flashback's ``PoiDataloader`` (class in Massive-STEPS/Flashback/dataloader.py).
+    """Optional Flashback ``PoiDataloader`` (not used by default SURD ``train.py``).
 
-    Prefer ``load_official_split_frames`` + ``build_samples_from_split`` for the
-    SURD training path; this helper is for direct Flashback-style loading.
+    Defaults: ``max_users=0``, ``min_checkins=0`` → no “≥20 check-ins” user filter.
+    (Upstream Flashback ``setting.py`` sets ``min_checkins = sequence_length+1`` with
+    ``sequence_length`` default 20, but that is their CLI path — not ours.)
+
+    Prefer ``load_official_split_frames`` + ``build_samples_from_split``.
     """
-    # Import after module-level FLASHBACK_DIR registration above.
     from dataloader import PoiDataloader  # type: ignore
 
     loader = PoiDataloader(max_users=max_users, min_checkins=min_checkins)

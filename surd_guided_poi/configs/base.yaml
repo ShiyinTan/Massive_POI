@@ -15,7 +15,10 @@ data:
   split_protocol: massive_steps_official
   # From official train only: holdout for MI/SURD estimation (cross-fitting).
   estimator_holdout_ratio: 0.2
+  # History window: truncate to last N (NOT “drop users with <20 check-ins”).
+  # 历史窗口截断长度，不是按用户总打卡数 <20 过滤。
   max_history_len: 20
+  # Per-trail: need ≥ min_history_len history steps → trail length ≥ min_history_len+1.
   min_history_len: 1
   # Flashback trains on all prefixes; Massive-STEPS LLM eval often uses last only.
   use_all_prefixes: true

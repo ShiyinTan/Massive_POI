@@ -138,6 +138,11 @@ def main():
         hf_dataset_id=data_cfg.get("hf_dataset_id"),
     )
 
+    # Pipeline sketch / 数据流示意:
+    #   CSV rows → frames["train"|"val"|"test"] (DataFrame, 1 row = 1 check-in)
+    #            → NextPOISample list (history → target_poi_id)
+    #            → DataLoader batches (padded tensors)
+    # No default filter for users with total sequence length < 20.
     print("Loading Massive-STEPS official train/validation/test CSVs...")
     split_paths = resolve_official_splits(city, **split_kwargs)
     frames = load_official_split_frames(city, **split_kwargs)
