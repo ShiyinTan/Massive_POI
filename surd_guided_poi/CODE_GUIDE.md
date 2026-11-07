@@ -71,7 +71,13 @@ surd_guided_poi/
 - `load_official_split_frames(city, ...)`
 - 可选：`load_flashback_poi_dataloader(...)` 直接构造 Flashback 的 `PoiDataloader`
 
-搜索顺序：`data.data_dir` → `Massive-STEPS/data/{city}/` → HF 缓存下载（`CRUISEResearchGroup/Massive-STEPS-*`）。
+CSV 搜索顺序：`data.data_dir` → `Massive-STEPS/data/{city}/` → HF 缓存下载（`CRUISEResearchGroup/Massive-STEPS-*`）。
+
+**Flashback 代码位置是固定的**（不做路径探测）：始终是仓库内 `Massive-STEPS/Flashback/`。  
+`massive_steps.py` 在 import 时把该目录加入 `sys.path`，因此可以像官方 Flashback 一样写 `from network import Flashback` / `from dataloader import PoiDataloader`。类定义见：
+
+- `Massive-STEPS/Flashback/network.py`
+- `Massive-STEPS/Flashback/dataloader.py`
 
 ### 3.2 预处理约定（对齐 Flashback）
 

@@ -1,13 +1,8 @@
-"""Flashback next-POI backbone (Massive-STEPS/Flashback), batch-adapted.
+"""Flashback next-POI backbone — thin adapter over Massive-STEPS/Flashback.
 
-Imports the official Flashback network shipped under
-``Massive-STEPS/Flashback/network.py`` and adapts our ``NextPOIBatch``
-(batch-first histories) to Flashback's sequence-first tensors.
-
-Why Flashback:
-* Already adapted to Massive-STEPS official train/val/test CSVs in this repo
-* Well-known sequential next-POI baseline (RNN + spatiotemporal decay)
-* Clean surface for wrapping SURD guidance on top
+Source of truth: ``Massive-STEPS/Flashback/network.py`` (fixed repo path).
+This module only converts our batch-first ``NextPOIBatch`` to Flashback's
+sequence-first tensors and returns the last valid timestep's logits.
 """
 
 from __future__ import annotations
@@ -18,19 +13,16 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-from ..data.massive_steps import ensure_flashback_on_path
+# Registers Massive-STEPS/Flashback on sys.path (fixed relative layout).
+from ..data.massive_steps import FLASHBACK_DIR  # noqa: F401
 from ..data.dataset import NextPOIBatch
 
-
-def _import_flashback():
-    ensure_flashback_on_path()
-    from network import Flashback, RnnFactory, create_h0_strategy  # type: ignore
-
-    return Flashback, RnnFactory, create_h0_strategy
+# Bare imports — same style as Massive-STEPS/Flashback/train.py
+from network import Flashback, RnnFactory, create_h0_strategy  # type: ignore
 
 
 class FlashbackBackbone(nn.Module):
-    """Recommendation backbone: Massive-STEPS Flashback → last-step POI logits."""
+    """Recommendation backbone: Flashback RNN → last-step POI logits."""
 
     def __init__(
         self,
@@ -42,7 +34,6 @@ class FlashbackBackbone(nn.Module):
         lambda_s: float = 100.0,
     ):
         super().__init__()
-        Flashback, RnnFactory, create_h0_strategy = _import_flashback()
         self.num_pois = num_pois
         self.num_users = num_users
         self.hidden_dim = hidden_dim
@@ -50,10 +41,15 @@ class FlashbackBackbone(nn.Module):
         self.lambda_t = lambda_t
         self.lambda_s = lambda_s
 
-        f_t = lambda delta_t, user_len: ((torch.cos(delta_t * 2 * np.pi / 86400) + 1) / 2) * torch.exp(
-            -(delta_t / 86400 * self.lambda_t)
-        )
-        f_s = lambda delta_s, user_len: torch.exp(-(delta_s * self.lambda_s))
+        # Spatiotemporal decay kernels (Flashback defaults).
+        def f_t(delta_t, user_len):
+            day = delta_t / 86400
+            return ((torch.cos(delta_t * 2 * np.pi / 86400) + 1) / 2) * torch.exp(
+                -(day * self.lambda_t)
+            )
+
+        def f_s(delta_s, user_len):
+            return torch.exp(-(delta_s * self.lambda_s))
 
         rnn_factory = RnnFactory(rnn_type)
         self.is_lstm = rnn_factory.is_lstm()
@@ -83,21 +79,23 @@ class FlashbackBackbone(nn.Module):
         seq_logits : [L, B, num_pois]
         h_next : hidden state
         """
-        # Flashback expects [seq, batch]
+        # Flashback expects [seq, batch]; our batch stores [batch, seq].
         x = batch.history_poi_ids.transpose(0, 1).contiguous()
         t = batch.history_unix.transpose(0, 1).contiguous()
         s = batch.history_coords.transpose(0, 1).contiguous()
         lengths = batch.history_lengths
         users = batch.user_id
+
         if h is None:
             h = self.initial_hidden(x.size(1), x.device)
+
         seq_logits, h_next = self.flashback(x, t, s, lengths, h, users)
-        # Gather last valid timestep per sequence.
-        last_idx = (lengths - 1).clamp(min=0)  # [B]
-        b_idx = torch.arange(x.size(1), device=x.device)
-        last_logits = seq_logits[last_idx, b_idx, :]
+        last_idx = (lengths - 1).clamp(min=0)
+        batch_idx = torch.arange(x.size(1), device=x.device)
+        last_logits = seq_logits[last_idx, batch_idx, :]
         return last_logits, seq_logits, h_next
 
     @property
     def location_embedding(self) -> nn.Embedding:
+        """Flashback POI embedding (shared with SURD Q1 when configured)."""
         return self.flashback.encoder

@@ -29,6 +29,26 @@ from surd_guided_poi.training.checkpoint import load_checkpoint
 from surd_guided_poi.training.config import load_config
 
 
+def _config_paths(args_config: list[str]) -> list[Path]:
+    return [Path(c) if Path(c).is_file() else PKG_ROOT / c for c in args_config]
+
+
+def _build_model(vocab, model_cfg: dict) -> SURDGuidedPOIModel:
+    hidden = int(model_cfg["hidden_dim"])
+    return SURDGuidedPOIModel(
+        num_pois=vocab.num_pois,
+        num_users=vocab.num_users,
+        hidden_dim=hidden,
+        poi_emb_dim=int(model_cfg.get("poi_emb_dim", hidden)),
+        subset_hidden_dim=int(model_cfg.get("subset_hidden_dim", hidden)),
+        dropout=float(model_cfg.get("dropout", 0.1)),
+        rnn_type=str(model_cfg.get("rnn_type", "gru")),
+        lambda_t=float(model_cfg.get("lambda_t", 0.1)),
+        lambda_s=float(model_cfg.get("lambda_s", 100.0)),
+        share_poi_embedding=bool(model_cfg.get("share_poi_embedding", True)),
+    )
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", nargs="+", default=["configs/base.yaml", "configs/dataset_beijing.yaml"])
@@ -37,8 +57,7 @@ def main():
     parser.add_argument("--data_dir", default=None)
     args = parser.parse_args()
 
-    cfg_paths = [Path(c) if Path(c).is_file() else PKG_ROOT / c for c in args.config]
-    cfg = load_config(cfg_paths)
+    cfg = load_config(_config_paths(args.config))
     if args.data_dir:
         cfg["data"]["data_dir"] = args.data_dir
     cfg["output_dir"] = args.output_dir
@@ -67,27 +86,15 @@ def main():
     )
     poi_prior = compute_poi_prior(train_samples, vocab.num_pois)
 
-    def loader(ss, shuffle=False):
+    def make_loader(samples, shuffle=False):
         return DataLoader(
-            NextPOIDataset(ss),
+            NextPOIDataset(samples),
             batch_size=int(cfg["train"]["batch_size"]),
             shuffle=shuffle,
             collate_fn=collate_next_poi,
         )
 
-    model_cfg = cfg["model"]
-    model = SURDGuidedPOIModel(
-        num_pois=vocab.num_pois,
-        num_users=vocab.num_users,
-        hidden_dim=int(model_cfg["hidden_dim"]),
-        poi_emb_dim=int(model_cfg.get("poi_emb_dim", model_cfg["hidden_dim"])),
-        subset_hidden_dim=int(model_cfg.get("subset_hidden_dim", model_cfg["hidden_dim"])),
-        dropout=float(model_cfg.get("dropout", 0.1)),
-        rnn_type=str(model_cfg.get("rnn_type", "gru")),
-        lambda_t=float(model_cfg.get("lambda_t", 0.1)),
-        lambda_s=float(model_cfg.get("lambda_s", 100.0)),
-        share_poi_embedding=bool(model_cfg.get("share_poi_embedding", True)),
-    )
+    model = _build_model(vocab, cfg["model"])
     load_checkpoint(args.checkpoint, model, map_location=device)
 
     out = Path(args.output_dir)
@@ -95,10 +102,10 @@ def main():
         out = PKG_ROOT / out
     trainer = AlternatingSURDTrainer(
         model=model,
-        train_loader=loader(model_train, True),
-        val_loader=loader(model_train),
-        estimator_fit_loader=loader(model_train, True),
-        estimation_loader=loader(estimation),
+        train_loader=make_loader(model_train, shuffle=True),
+        val_loader=make_loader(model_train),
+        estimator_fit_loader=make_loader(model_train, shuffle=True),
+        estimation_loader=make_loader(estimation),
         poi_prior=poi_prior,
         config=cfg,
         device=device,
