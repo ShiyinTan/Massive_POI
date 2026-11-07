@@ -1,0 +1,9 @@
+outputs/**
+!outputs/.gitkeep
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.cache/
+*.pt
+*.pth
+.DS_Store

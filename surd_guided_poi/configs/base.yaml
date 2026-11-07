@@ -1,0 +1,59 @@
+seed: 42
+device: null  # null -> auto cuda/cpu
+output_dir: outputs/default
+
+data:
+  city: beijing
+  # Local CSV (preferred if present). Relative paths resolve from repo root or this package.
+  checkins_csv: null
+  # HuggingFace dataset id; used when checkins_csv is missing.
+  hf_dataset_id: CRUISEResearchGroup/Massive-STEPS-Beijing
+  hf_filename: beijing_checkins.csv
+  cache_dir: outputs/data_cache
+  # Temporal split ratios on target check-in timestamps (no future leakage).
+  train_ratio: 0.7
+  val_ratio: 0.1
+  test_ratio: 0.2
+  # From train period only: fraction held out for MI/SURD estimation (cross-fitting).
+  estimator_holdout_ratio: 0.2
+  max_history_len: 20
+  min_history_len: 1
+  # Use every prefix within a trail as a sample (True) or only the last check-in (False).
+  use_all_prefixes: true
+  # Transductive: POI vocab built from all check-ins before temporal labels are used.
+  setting: transductive
+
+model:
+  hidden_dim: 64
+  poi_emb_dim: 64
+  num_layers_history: 1
+  dropout: 0.1
+  subset_hidden_dim: 64
+
+train:
+  batch_size: 64
+  num_workers: 0
+  lr: 0.001
+  weight_decay: 0.00001
+  warmup_epochs: 2
+  total_epochs: 10
+  surd_refresh_interval: 3
+  lambda_u: 0.5
+  lambda_s: 0.5
+  ema_beta: 0.5
+  grad_clip: 5.0
+  subset_fit_epochs: 3
+  subset_fit_lr: 0.001
+  log_every: 20
+
+surd:
+  eps: 1.0e-12
+  # Minimum target-POI samples on the estimation split before trusting POI-specific weights.
+  min_poi_samples: 3
+  shrink_kappa: 10.0
+  # Units for specific MI / SURD logs: "nats" (ln) or "bits" (log2). Must stay consistent.
+  units: nats
+
+eval:
+  ks: [1, 5, 10]
+  frequency_buckets: [0.2, 0.5]  # cumulative frequency cutoffs -> head / mid / tail

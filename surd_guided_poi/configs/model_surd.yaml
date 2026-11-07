@@ -1,0 +1,17 @@
+# SURD-guided training overlay (keeps 3 sources; no Q4).
+model:
+  hidden_dim: 64
+  poi_emb_dim: 64
+  subset_hidden_dim: 64
+
+train:
+  lambda_u: 0.5
+  lambda_s: 0.5
+  ema_beta: 0.5
+  surd_refresh_interval: 3
+  subset_fit_epochs: 3
+
+surd:
+  min_poi_samples: 3
+  shrink_kappa: 10.0
+  units: nats
