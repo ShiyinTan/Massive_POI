@@ -68,10 +68,10 @@ class NextPOISample:
 
 
 def build_vocab_from_frames(frames: Mapping[str, pd.DataFrame]) -> Vocab:
-    """Transductive vocab over all official splits (Flashback-compatible)."""
+    """把 train+val+test 的 venue/user 编成连续 id（和 Flashback 一样，看见全部 POI）。"""
     all_df = pd.concat(list(frames.values()), ignore_index=True)
     pois = sorted(all_df["venue_id"].unique().tolist())
-    poi2idx = {p: i for i, p in enumerate(pois)}
+    poi2idx = {p: i for i, p in enumerate(pois)}  # 原始 venue_id → 0..K-1
     users = sorted(all_df["user_id"].unique().tolist(), key=lambda x: str(x))
     user2idx = {u: i for i, u in enumerate(users)}
     cats = sorted(all_df["venue_category"].astype(str).unique().tolist())
@@ -231,21 +231,23 @@ def build_samples_from_split(
     history_source = df if user_history_df is None else user_history_df
     user_groups = {u: g for u, g in history_source.groupby("user_id", sort=False)}
 
+    # 按「用户 + 轨迹」切：一条 trail 可切出多个「history → 下一站」样本
     for (user_raw, trail_id), g in df.groupby(["user_id", "trail_id"], sort=False):
         g = g.sort_values("timestamp")
         if len(g) < min_history_len + 1:
-            continue
+            continue  # 太短：凑不出「至少 1 个历史 + 1 个目标」
         poi_ids = [vocab.poi2idx[int(v)] for v in g["venue_id"].tolist()]
         ts_list = list(g["timestamp"])
-        unix = [float(ts.value // 10**9) for ts in ts_list]  # Flashback: ns → seconds
+        unix = [float(ts.value // 10**9) for ts in ts_list]  # Flashback 要秒级时间戳
         lats = [float(x) if pd.notna(x) else float("nan") for x in g["latitude"].tolist()]
         lons = [float(x) if pd.notna(x) else float("nan") for x in g["longitude"].tolist()]
         user_id = vocab.user2idx[user_raw]
         user_df = user_groups.get(user_raw, g)
 
+        # 默认每个前缀都当样本；否则只预测 trail 最后一站
         targets = range(min_history_len, len(g)) if use_all_prefixes else [len(g) - 1]
         for t in targets:
-            hist_start = max(0, t - max_history_len)
+            hist_start = max(0, t - max_history_len)  # 只保留最近 max_history_len 步
             hist_pois = poi_ids[hist_start:t]
             hist_ts = ts_list[hist_start:t]
             hist_unix = unix[hist_start:t]
@@ -277,16 +279,27 @@ def build_samples_from_split(
 
 
 def compute_poi_prior(samples: Sequence[NextPOISample], num_pois: int) -> np.ndarray:
+    """归一化先验 P(Y=y)=N_y/N（概率，和为 1）。
+
+    和 ``poi_sample_counts`` 不是重复：那边是原始次数 N_y，这边是除以总样本数后的概率。
+    用途：Specific MI 分母 log P(y)；global SURD 按 P(y) 加权。
+    """
     counts = np.zeros(num_pois, dtype=np.float64)
     for s in samples:
-        counts[s.target_poi_id] += 1.0
+        counts[s.target_poi_id] += 1.0  # 只数「下一站」标签
     total = counts.sum()
     if total <= 0:
         raise ValueError("Empty sample list for prior.")
-    return counts / total
+    return counts / total  # [K]，不是整数 N_y
 
 
 def poi_sample_counts(samples: Sequence[NextPOISample], num_pois: int) -> np.ndarray:
+    """原始计数 N_y：每个 POI 当过多少次「下一站」标签（整数）。
+
+    和 ``compute_poi_prior`` 不是重复：先验 = N_y/N，但「样本是否够少」要用整数 N_y
+    （例如 N_y < min_poi_samples → fallback），不能只看概率。
+    用途：长尾分桶、SURD 权重 fallback/收缩、日志。
+    """
     counts = np.zeros(num_pois, dtype=np.int64)
     for s in samples:
         counts[s.target_poi_id] += 1

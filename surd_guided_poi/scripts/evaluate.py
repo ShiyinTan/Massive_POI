@@ -85,6 +85,7 @@ def main():
     vocab = build_vocab_from_frames(frames)
     train_samples = _samples(frames["train"], vocab, "train", data_cfg)
     test_samples = _samples(frames["test"], vocab, "test", data_cfg)
+    # 长尾分桶要用整数 N_y，不能用归一化的 prior
     train_counts = poi_sample_counts(train_samples, vocab.num_pois)
 
     model = _build_model(vocab, cfg["model"])

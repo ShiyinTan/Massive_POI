@@ -156,7 +156,9 @@ def main():
     model_train, estimation = carve_estimator_holdout(
         train_samples, holdout_ratio=float(data_cfg["estimator_holdout_ratio"])
     )
+    # prior = N_y/N（概率，给 MI/SURD）；counts = N_y（整数，给日志/长尾）
     poi_prior = compute_poi_prior(train_samples, vocab.num_pois)
+    train_counts = poi_sample_counts(train_samples, vocab.num_pois)
     write_json(
         output_dir / "data_summary.json",
         {
@@ -171,7 +173,7 @@ def main():
             "n_val": len(val_samples),
             "n_test": len(test_samples),
             "setting": data_cfg.get("setting", "transductive"),
-            "train_counts": poi_sample_counts(train_samples, vocab.num_pois).tolist(),
+            "train_counts": train_counts.tolist(),  # 原始 N_y，不是 prior
         },
     )
     print(

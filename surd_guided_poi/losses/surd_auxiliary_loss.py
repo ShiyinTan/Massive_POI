@@ -20,17 +20,13 @@ def unique_auxiliary_loss(
     unique_weight_table: torch.Tensor,
     source_order: Sequence[str] = SOURCE_NAMES,
 ) -> torch.Tensor:
-    """
-    L_U = -1/N sum_n sum_i w_i^U(y_n) log P_i(y_n | Q_i)
-
-    unique_weight_table: [num_pois, num_sources] detached.
-    """
-    w = unique_weight_table[target]  # [B, m]
+    """按真实下一站 y 查 unique 权重，加权各单源头的交叉熵（权重不反传）。"""
+    w = unique_weight_table[target]  # [B, m]：这一批样本各自该强调哪些单源
     loss = target.new_zeros(())
     for i, name in enumerate(source_order):
         logits = single_source_logits[name]
         nll = F.cross_entropy(logits, target, reduction="none")
-        loss = loss + (w[:, i] * nll).mean()
+        loss = loss + (w[:, i] * nll).mean()  # 权重大 → 更用力训这个源
     return loss
 
 
@@ -40,9 +36,7 @@ def synergy_auxiliary_loss(
     synergy_weight_table: torch.Tensor,
     subset_keys: Sequence[str] | None = None,
 ) -> torch.Tensor:
-    """
-    L_S = -1/N sum_n sum_{|A|>=2} w_A^S(y_n) log P_A(y_n | Q_A)
-    """
+    """按 y 查 synergy 权重，加权多源组合头 CE（同样不是「纯 synergy 信息量」）。"""
     if subset_keys is None:
         subset_keys = [subset_key(s) for s in SUBSET_NAMES if len(s) >= 2]
     w = synergy_weight_table[target]  # [B, num_multi]

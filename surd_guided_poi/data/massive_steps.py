@@ -148,7 +148,7 @@ def resolve_official_splits(
 
 
 def _normalize_split_frame(df: pd.DataFrame, path: Path) -> pd.DataFrame:
-    """Light cleanup aligned with Flashback/dataloader.py."""
+    """读入后轻量清洗（对齐 Flashback）：补坐标、解析时间、排序。"""
     required = {"trail_id", "user_id", "venue_id", "timestamp"}
     missing = required - set(df.columns)
     if missing:
@@ -158,6 +158,7 @@ def _normalize_split_frame(df: pd.DataFrame, path: Path) -> pd.DataFrame:
         df["latitude"] = pd.NA
     if "longitude" not in df.columns:
         df["longitude"] = pd.NA
+    # 场馆坐标缺失时，用城市中心顶上（和 Flashback 一样）
     if "venue_city_latitude" in df.columns:
         df["latitude"] = df["latitude"].fillna(df["venue_city_latitude"])
     if "venue_city_longitude" in df.columns:

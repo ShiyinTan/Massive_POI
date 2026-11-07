@@ -84,6 +84,7 @@ def main():
     model_train, estimation = carve_estimator_holdout(
         train_samples, holdout_ratio=float(data_cfg["estimator_holdout_ratio"])
     )
+    # P(Y=y)=N_y/N，给 Specific MI / global SURD；不是原始计数
     poi_prior = compute_poi_prior(train_samples, vocab.num_pois)
 
     def make_loader(samples, shuffle=False):

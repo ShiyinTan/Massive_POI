@@ -46,6 +46,7 @@ class AlternatingSURDTrainer:
         self.val_loader = val_loader
         self.estimator_fit_loader = estimator_fit_loader
         self.estimation_loader = estimation_loader
+        # P(Y=y)=N_y/N（概率）；fallback 用的整数 N_y 来自估计集 counts，不是这个向量
         self.poi_prior = np.asarray(poi_prior, dtype=np.float64)
         self.config = config
         self.device = device
@@ -83,12 +84,12 @@ class AlternatingSURDTrainer:
         return list(self.model.subset_estimators.parameters())
 
     def warmup(self) -> None:
+        """先只训推荐（Flashback），子集头先冻住。"""
         epochs = int(self.config["train"]["warmup_epochs"])
         for epoch in range(epochs):
             self.model.train()
-            # Freeze subset heads during warmup (recommendation only).
             for p in self._subset_parameters():
-                p.requires_grad_(False)
+                p.requires_grad_(False)  # warm-up 不训 SURD 头
             total = 0.0
             n = 0
             for batch in tqdm(self.train_loader, desc=f"warmup {epoch+1}/{epochs}", leave=False):
@@ -144,10 +145,11 @@ class AlternatingSURDTrainer:
             p.requires_grad_(False)
 
     def refresh_surd(self, tag: str) -> Dict[str, Any]:
-        """Phase A: fit heads, estimate specific MI on holdout, assign SURD, build weights."""
+        """Phase A：估 Specific MI → SURD → 建成训练用的 U/S 权重（不反传）。"""
         self.fit_subset_estimators()
         probs, labels = collect_subset_probs(self.model, self.estimation_loader, self.device)
         calib = summarize_calibration(probs, labels)
+        # prior 进 MI 分母；返回的 counts 是估计集上的整数 N_y（给 fallback）
         specific_mi, counts = estimate_specific_mi(
             probs,
             labels,
@@ -157,10 +159,10 @@ class AlternatingSURDTrainer:
         )
         specific_mi = enforce_subset_monotonicity(specific_mi)
         poi_surd = assign_surd_from_specific_mi(specific_mi)
-        global_surd = aggregate_global_surd(poi_surd, self.poi_prior)
+        global_surd = aggregate_global_surd(poi_surd, self.poi_prior)  # 按 P(y) 加权
         new_weights = build_poi_specific_weights(
             poi_surd=poi_surd,
-            poi_sample_counts=counts,
+            poi_sample_counts=counts,  # 整数 N_y：够不够样本、往全局收缩多少
             poi_prior=self.poi_prior,
             min_poi_samples=int(self.config["surd"]["min_poi_samples"]),
             shrink_kappa=float(self.config["surd"]["shrink_kappa"]),
@@ -228,10 +230,10 @@ class AlternatingSURDTrainer:
         )
 
     def train_recommendation_epoch(self, epoch: int) -> Dict[str, float]:
-        """Phase B: update encoders/rec head with fixed detached SURD weights."""
+        """Phase B：固定 SURD 权重，继续训推荐；总损失 = L_rec + λ_U L_U + λ_S L_S。"""
         self.model.train()
         for p in self._subset_parameters():
-            p.requires_grad_(False)
+            p.requires_grad_(False)  # 这阶段不更新子集头
         for p in self._rec_parameters():
             p.requires_grad_(True)
 
@@ -247,7 +249,7 @@ class AlternatingSURDTrainer:
                 loss_u = batch.target_poi_id.new_zeros(())
                 loss_s = batch.target_poi_id.new_zeros(())
             else:
-                # Weights are detached tensors — no backprop through SURD estimation.
+                # 用真实标签 y 查表加权；权重已 detach，梯度不流回 SURD 估计
                 loss_u = unique_auxiliary_loss(
                     out["single_source_logits"],
                     batch.target_poi_id,
@@ -273,6 +275,7 @@ class AlternatingSURDTrainer:
         return {k: v / max(n, 1) for k, v in totals.items()}
 
     def fit(self) -> Dict[str, Any]:
+        # 流程：warm-up → 首次估 SURD → 循环（训推荐；每隔几轮再估 SURD）
         self.warmup()
         self.refresh_surd(tag="epoch_0000_init")
 
@@ -297,6 +300,7 @@ class AlternatingSURDTrainer:
                     meta={"epoch": epoch, "val": val_metrics},
                 )
 
+            # 周期性重估 SURD 权重（EMA 平滑）
             if epoch % refresh_every == 0 and epoch < total_epochs:
                 self.refresh_surd(tag=f"epoch_{epoch:04d}")
 

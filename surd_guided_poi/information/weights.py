@@ -10,6 +10,7 @@ from ..models.subset_estimators import SOURCE_NAMES, SUBSET_NAMES, subset_key
 
 
 def _normalize_nonneg(values: Mapping[str, float], eps: float) -> Dict[str, float]:
+    """非负项归一化成「权重和为 1」；全 0 则全 0。"""
     clipped = {k: max(float(v), 0.0) for k, v in values.items()}
     total = sum(clipped.values())
     if total <= eps:
@@ -25,15 +26,11 @@ def build_poi_specific_weights(
     shrink_kappa: float = 10.0,
     eps: float = 1e-12,
 ) -> Dict[str, Any]:
-    """
-    Returns dict with:
-      unique_weights[poi][Qi], synergy_weights[poi][subset],
-      signed contributions, fallback flags, sample counts.
-    """
+    """把每个 POI 的 U/S 量变成训练用权重；样本太少的 POI 往全局权重靠。"""
     counts = np.asarray(poi_sample_counts, dtype=np.int64)
     K = len(counts)
 
-    # Global fallback from population-weighted average of specific terms.
+    # 先算一份「全局平均」权重，给长尾 POI 当 fallback
     global_u = {n: 0.0 for n in SOURCE_NAMES}
     global_s: Dict[str, float] = {
         subset_key(s): 0.0 for s in SUBSET_NAMES if len(s) >= 2
@@ -78,13 +75,13 @@ def build_poi_specific_weights(
             if len(s) >= 2:
                 s_raw.setdefault(subset_key(s), 0.0)
 
-        n_y = int(counts[y]) if y < K else 0
-        use_fallback = n_y < min_poi_samples
+        n_y = int(counts[y]) if y < K else 0  # 这里必须用整数 N_y，不能用 prior
+        use_fallback = n_y < min_poi_samples  # 样本太少：别信这个 POI 自己的 SURD
         fallback[y] = use_fallback
         if use_fallback:
-            rho = 0.0
+            rho = 0.0  # 全用全局
         else:
-            rho = float(n_y) / float(n_y + shrink_kappa)
+            rho = float(n_y) / float(n_y + shrink_kappa)  # 样本越多，越信自己
 
         unique_weights[y] = {
             n: rho * u_raw.get(n, 0.0) + (1.0 - rho) * global_u_w.get(n, 0.0) for n in SOURCE_NAMES
@@ -92,7 +89,6 @@ def build_poi_specific_weights(
         synergy_weights[y] = {
             k: rho * s_raw.get(k, 0.0) + (1.0 - rho) * global_s_w.get(k, 0.0) for k in global_s_w
         }
-        # Re-normalize after shrinkage.
         unique_weights[y] = _normalize_nonneg(unique_weights[y], eps)
         synergy_weights[y] = _normalize_nonneg(synergy_weights[y], eps)
 
@@ -114,7 +110,7 @@ def ema_update_weights(
     new: Dict[str, Any],
     beta: float = 0.5,
 ) -> Dict[str, Any]:
-    """EMA over POI-specific normalized weights; beta in [0, 1)."""
+    """新旧 SURD 权重做指数滑动平均，避免每隔几轮权重跳太猛。"""
     if old is None or beta <= 0:
         return new
     beta = float(beta)
@@ -139,7 +135,7 @@ def weights_to_tensors(
     num_pois: int,
     device,
 ) -> Dict[str, "torch.Tensor"]:
-    """Stack POI-specific weights into tensors [K, ...] for batched gather."""
+    """字典权重 → 张量 [K, ...]，方便按 target_poi_id 查表；.detach() 保证不反传。"""
     import torch
 
     u_keys = list(SOURCE_NAMES)
@@ -154,7 +150,7 @@ def weights_to_tensors(
         for i, k in enumerate(s_keys):
             s[y, i] = float(sw.get(k, 0.0))
     return {
-        "unique": u.detach(),
+        "unique": u.detach(),  # SURD 估计本身不参与梯度
         "synergy": s.detach(),
         "unique_keys": u_keys,
         "synergy_keys": s_keys,
