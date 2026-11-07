@@ -42,9 +42,11 @@ class AlternatingSURDTrainer:
         output_dir: str | Path,
     ):
         self.model = model.to(device)
-        self.train_loader = train_loader
+        self.train_loader = train_loader  # carve 的 model_train：推荐主训
         self.val_loader = val_loader
+        # carve 的 model_train：Phase A 拟合子集头（与估 MI 的样本分开）
         self.estimator_fit_loader = estimator_fit_loader
+        # carve 的 estimation holdout：Phase A 只在这里算 Specific MI / SURD
         self.estimation_loader = estimation_loader
         # P(Y=y)=N_y/N（概率）；fallback 用的整数 N_y 来自估计集 counts，不是这个向量
         self.poi_prior = np.asarray(poi_prior, dtype=np.float64)

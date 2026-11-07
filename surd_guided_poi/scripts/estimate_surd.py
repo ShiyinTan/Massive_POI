@@ -81,6 +81,7 @@ def main():
         min_history_len=int(data_cfg["min_history_len"]),
         use_all_prefixes=bool(data_cfg["use_all_prefixes"]),
     )
+    # 与 train.py 相同：model_train 拟合子集头；estimation 只估 SURD
     model_train, estimation = carve_estimator_holdout(
         train_samples, holdout_ratio=float(data_cfg["estimator_holdout_ratio"])
     )
@@ -105,8 +106,8 @@ def main():
         model=model,
         train_loader=make_loader(model_train, shuffle=True),
         val_loader=make_loader(model_train),
-        estimator_fit_loader=make_loader(model_train, shuffle=True),
-        estimation_loader=make_loader(estimation),
+        estimator_fit_loader=make_loader(model_train, shuffle=True),  # carve 的 model_train
+        estimation_loader=make_loader(estimation),  # carve 的 holdout → 只估 SURD
         poi_prior=poi_prior,
         config=cfg,
         device=device,
