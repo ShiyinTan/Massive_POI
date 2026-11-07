@@ -1,0 +1,61 @@
+seed: 42
+device: null  # null -> auto cuda/cpu
+output_dir: outputs/default
+
+data:
+  city: beijing
+  # Directory containing Massive-STEPS official split CSVs:
+  #   {city}_checkins_train.csv / _validation.csv / _test.csv
+  # If null, tries Massive-STEPS/data/{city}/ then HuggingFace download.
+  data_dir: null
+  hf_dataset_id: CRUISEResearchGroup/Massive-STEPS-Beijing
+  cache_dir: outputs/data_cache
+  # Official Massive-STEPS protocol (trail-level, user-stratified). Do not replace
+  # with a custom global temporal split.
+  split_protocol: massive_steps_official
+  # From official train only: holdout for MI/SURD estimation (cross-fitting).
+  estimator_holdout_ratio: 0.2
+  max_history_len: 20
+  min_history_len: 1
+  # Flashback trains on all prefixes; Massive-STEPS LLM eval often uses last only.
+  use_all_prefixes: true
+  setting: transductive
+
+model:
+  backbone: flashback
+  hidden_dim: 64
+  poi_emb_dim: 64  # ignored when share_poi_embedding=true (Flashback emb dim = hidden_dim)
+  num_layers_history: 1
+  dropout: 0.1
+  subset_hidden_dim: 64
+  rnn_type: gru
+  # Flashback spatiotemporal decay (Massive-STEPS/Flashback defaults)
+  lambda_t: 0.1
+  lambda_s: 100.0
+  share_poi_embedding: true
+
+train:
+  batch_size: 64
+  num_workers: 0
+  lr: 0.001
+  weight_decay: 0.00001
+  warmup_epochs: 2
+  total_epochs: 10
+  surd_refresh_interval: 3
+  lambda_u: 0.5
+  lambda_s: 0.5
+  ema_beta: 0.5
+  grad_clip: 5.0
+  subset_fit_epochs: 3
+  subset_fit_lr: 0.001
+  log_every: 20
+
+surd:
+  eps: 1.0e-12
+  min_poi_samples: 3
+  shrink_kappa: 10.0
+  units: nats
+
+eval:
+  ks: [1, 5, 10]
+  frequency_buckets: [0.2, 0.5]

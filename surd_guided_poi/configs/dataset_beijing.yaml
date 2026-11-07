@@ -1,0 +1,16 @@
+data:
+  city: beijing
+  hf_dataset_id: CRUISEResearchGroup/Massive-STEPS-Beijing
+  # Optional local override, e.g. /tmp/massive-steps-data/Beijing
+  data_dir: null
+  max_history_len: 20
+  use_all_prefixes: true
+  split_protocol: massive_steps_official
+
+train:
+  batch_size: 32
+  warmup_epochs: 1
+  total_epochs: 6
+  surd_refresh_interval: 2
+
+output_dir: outputs/beijing

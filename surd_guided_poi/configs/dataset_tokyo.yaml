@@ -1,0 +1,15 @@
+data:
+  city: tokyo
+  hf_dataset_id: CRUISEResearchGroup/Massive-STEPS-Tokyo
+  data_dir: null
+  max_history_len: 20
+  use_all_prefixes: true
+  split_protocol: massive_steps_official
+
+train:
+  batch_size: 64
+  warmup_epochs: 2
+  total_epochs: 10
+  surd_refresh_interval: 3
+
+output_dir: outputs/tokyo
