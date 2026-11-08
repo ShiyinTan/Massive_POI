@@ -12,7 +12,18 @@ import torch.nn as nn
 
 
 class HistoryEncoder(nn.Module):
-    """Q1: personal preference / history from the POI sequence."""
+    """Q1 历史偏好：POI 序列 → 固定向量。
+
+    输入::
+
+        poi_ids  [B, L]   # 历史 POI id（可含 padding）
+        lengths  [B]
+        mask     [B, L]
+
+    输出::
+
+        h1  [B, hidden_dim]   # 例 hidden_dim=64 → [B, 64]
+    """
 
     def __init__(
         self,
@@ -42,22 +53,25 @@ class HistoryEncoder(nn.Module):
         self.dropout = nn.Dropout(dropout)
 
     def forward(self, poi_ids: torch.Tensor, lengths: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
-        x = self.dropout(self.emb(poi_ids))
+        x = self.dropout(self.emb(poi_ids))  # [B, L, emb]
         lengths_cpu = lengths.clamp(min=1).cpu()
         packed = nn.utils.rnn.pack_padded_sequence(
             x, lengths_cpu, batch_first=True, enforce_sorted=False
         )
         _, h_n = self.gru(packed)
-        h = h_n[-1]
+        h = h_n[-1]  # [B, hidden]
         empty = lengths == 0
         if empty.any():
             h = h.clone()
             h[empty] = 0
-        return self.out(h)
+        return self.out(h)  # [B, hidden]
 
 
 class TemporalEncoder(nn.Module):
-    """Q2: temporal context from target-time features."""
+    """Q2 时间：目标时刻特征 → 向量。
+
+    输入 ``time_features`` [B, 8]；输出 ``h2`` [B, hidden_dim]。
+    """
 
     def __init__(self, in_dim: int = 8, hidden_dim: int = 64, dropout: float = 0.1):
         super().__init__()
@@ -69,11 +83,14 @@ class TemporalEncoder(nn.Module):
         )
 
     def forward(self, time_features: torch.Tensor) -> torch.Tensor:
-        return self.net(time_features)
+        return self.net(time_features)  # [B, 8] → [B, hidden]
 
 
 class SpatialEncoder(nn.Module):
-    """Q3: spatial context from history location statistics."""
+    """Q3 空间：历史位置统计特征 → 向量。
+
+    输入 ``spatial_features`` [B, 12]；输出 ``h3`` [B, hidden_dim]。
+    """
 
     def __init__(self, in_dim: int = 12, hidden_dim: int = 64, dropout: float = 0.1):
         super().__init__()
@@ -85,4 +102,4 @@ class SpatialEncoder(nn.Module):
         )
 
     def forward(self, spatial_features: torch.Tensor) -> torch.Tensor:
-        return self.net(spatial_features)
+        return self.net(spatial_features)  # [B, 12] → [B, hidden]

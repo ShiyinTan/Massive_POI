@@ -28,6 +28,11 @@ def subset_key(subset: Iterable[str]) -> str:
 
 
 class SubsetHead(nn.Module):
+    """单个子集头：拼接后的源向量 → POI logits。
+
+    例：子集 {Q1,Q2} → 输入 [B, 2*hidden] → 输出 [B, K]。
+    """
+
     def __init__(self, in_dim: int, hidden_dim: int, num_pois: int, dropout: float = 0.1):
         super().__init__()
         self.net = nn.Sequential(
@@ -38,15 +43,23 @@ class SubsetHead(nn.Module):
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.net(x)
+        return self.net(x)  # [B, in_dim] → [B, K]
 
 
 class SubsetEstimators(nn.Module):
-    """
-    Seven subset probability heads for m=3.
+    """3 个源 → 7 个非空子集概率头（只看自己被授权的 h_i）。
 
-    Each head only receives the concatenations of its authorized source
-    representations — no bypass to other sources.
+    输入 ``source_hs = [h1, h2, h3]``，每个 ``[B, hidden]``。
+
+    输出 dict（键 → logits）::
+
+        "Q1"       → [B, K]
+        "Q2"       → [B, K]
+        "Q3"       → [B, K]
+        "Q1_Q2"    → [B, K]   # 输入是 concat(h1,h2) = [B, 2*hidden]
+        "Q1_Q3"    → [B, K]
+        "Q2_Q3"    → [B, K]
+        "Q1_Q2_Q3" → [B, K]   # concat 三维 → [B, 3*hidden]
     """
 
     def __init__(
@@ -70,18 +83,19 @@ class SubsetEstimators(nn.Module):
             self._subset_indices[key] = [name_to_idx[s] for s in subset]
 
     def forward(self, source_hs: Sequence[torch.Tensor]) -> Dict[str, torch.Tensor]:
-        """Return logits dict keyed by 'Q1', 'Q1_Q2', ..."""
         if len(source_hs) != len(self.source_names):
             raise ValueError("source_hs length must match number of sources")
         out: Dict[str, torch.Tensor] = {}
         for key, idxs in self._subset_indices.items():
             parts = [source_hs[i] for i in idxs]
-            x = torch.cat(parts, dim=-1)
-            out[key] = self.heads[key](x)
+            x = torch.cat(parts, dim=-1)  # [B, |A|*hidden]
+            out[key] = self.heads[key](x)  # [B, K]
         return out
 
     def single_source_logits(self, logits: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
+        """只取单源头：Q1/Q2/Q3 → 各 [B, K]（给 L_U）。"""
         return {k: logits[k] for k in self.source_names}
 
     def multi_source_logits(self, logits: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
+        """只取多源组合头：Q1_Q2 等 → 各 [B, K]（给 L_S）。"""
         return {k: v for k, v in logits.items() if "_" in k}

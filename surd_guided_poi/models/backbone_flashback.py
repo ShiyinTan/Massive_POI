@@ -22,7 +22,24 @@ from network import Flashback, RnnFactory, create_h0_strategy  # type: ignore
 
 
 class FlashbackBackbone(nn.Module):
-    """Recommendation backbone: Flashback RNN → last-step POI logits."""
+    """推荐骨干：官方 Flashback → 每条序列最后一步的 POI logits。
+
+    记号：B=batch，L=历史长度，K=num_pois（POI 个数）。
+
+    输入 ``NextPOIBatch``（我们这边是 batch-first）::
+
+        history_poi_ids  [B, L]
+        history_unix     [B, L]
+        history_coords   [B, L, 2]
+        history_lengths  [B]
+        user_id          [B]
+
+    输出::
+
+        last_logits  [B, K]      # 下一站分数（训练/推理主要用这个）
+        seq_logits   [L, B, K]   # Flashback 逐步输出（序列维在前）
+        h_next       隐状态
+    """
 
     def __init__(
         self,
@@ -72,27 +89,20 @@ class FlashbackBackbone(nn.Module):
         batch: NextPOIBatch,
         h: Optional[torch.Tensor] = None,
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        """
-        Returns
-        -------
-        last_logits : [B, num_pois]
-        seq_logits : [L, B, num_pois]
-        h_next : hidden state
-        """
-        # Flashback expects [seq, batch]; our batch stores [batch, seq].
-        x = batch.history_poi_ids.transpose(0, 1).contiguous()
-        t = batch.history_unix.transpose(0, 1).contiguous()
-        s = batch.history_coords.transpose(0, 1).contiguous()
-        lengths = batch.history_lengths
-        users = batch.user_id
+        # Flashback 要 [L, B]；我们 batch 里是 [B, L]
+        x = batch.history_poi_ids.transpose(0, 1).contiguous()  # [L, B]
+        t = batch.history_unix.transpose(0, 1).contiguous()  # [L, B]
+        s = batch.history_coords.transpose(0, 1).contiguous()  # [L, B, 2]
+        lengths = batch.history_lengths  # [B]
+        users = batch.user_id  # [B]
 
         if h is None:
             h = self.initial_hidden(x.size(1), x.device)
 
-        seq_logits, h_next = self.flashback(x, t, s, lengths, h, users)
-        last_idx = (lengths - 1).clamp(min=0)
+        seq_logits, h_next = self.flashback(x, t, s, lengths, h, users)  # [L,B,K]
+        last_idx = (lengths - 1).clamp(min=0)  # [B]
         batch_idx = torch.arange(x.size(1), device=x.device)
-        last_logits = seq_logits[last_idx, batch_idx, :]
+        last_logits = seq_logits[last_idx, batch_idx, :]  # [B, K]
         return last_logits, seq_logits, h_next
 
     @property
