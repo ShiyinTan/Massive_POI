@@ -22,6 +22,7 @@ def _s(i: int, day: int) -> NextPOISample:
         history_lats=[0.0],
         history_lons=[0.0],
         history_unix=[float(ts.value // 10**9) - 3600],
+        history_time_features=np.zeros((1, 10), dtype=np.float32),
         target_poi_id=1,
         target_timestamp=ts,
         target_time_features=np.zeros(8, dtype=np.float32),

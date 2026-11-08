@@ -8,7 +8,11 @@ import torch
 import torch.nn as nn
 
 from ..data.dataset import NextPOIBatch
-from ..data.feature_builder import SPATIAL_FEATURE_DIM, TIME_FEATURE_DIM
+from ..data.feature_builder import (
+    HISTORY_TIME_FEATURE_DIM,
+    SPATIAL_FEATURE_DIM,
+    TIME_FEATURE_DIM,
+)
 from .backbone_flashback import FlashbackBackbone
 from .encoders import HistoryEncoder, SpatialEncoder, TemporalEncoder
 from .subset_estimators import SOURCE_NAMES, SubsetEstimators
@@ -71,7 +75,10 @@ class SURDGuidedPOIModel(nn.Module):
             shared_embedding=shared_emb,
         )
         self.temporal_encoder = TemporalEncoder(
-            in_dim=TIME_FEATURE_DIM, hidden_dim=hidden_dim, dropout=dropout
+            hist_in_dim=HISTORY_TIME_FEATURE_DIM,
+            tgt_in_dim=TIME_FEATURE_DIM,
+            hidden_dim=hidden_dim,
+            dropout=dropout,
         )
         self.spatial_encoder = SpatialEncoder(
             in_dim=SPATIAL_FEATURE_DIM, hidden_dim=hidden_dim, dropout=dropout
@@ -86,7 +93,13 @@ class SURDGuidedPOIModel(nn.Module):
     def encode_sources(self, batch: NextPOIBatch) -> list[torch.Tensor]:
         """侧路三源：各返回 [B, d]，只给 SURD 子集头用。"""
         h1 = self.history_encoder(batch.history_poi_ids, batch.history_lengths, batch.history_mask)
-        h2 = self.temporal_encoder(batch.target_time_features)
+        # Q2：历史时间序列 [B,L,10] + 目标时刻 [B,8] → h2 [B,d]
+        h2 = self.temporal_encoder(
+            batch.history_time_features,
+            batch.history_lengths,
+            batch.history_mask,
+            batch.target_time_features,
+        )
         h3 = self.spatial_encoder(batch.spatial_features)
         return [h1, h2, h3]  # 三个 [B, d]
 
