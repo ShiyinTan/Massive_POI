@@ -15,11 +15,19 @@ from .subset_estimators import SOURCE_NAMES, SubsetEstimators
 
 
 class SURDGuidedPOIModel(nn.Module):
-    """Flashback recommendation + side encoders / subset heads for SURD.
+    """Flashback 推荐 + SURD 侧路（Q1/Q2/Q3 + 7 子集头）。
 
-    * ``recommend`` / ``rec_logits`` — Flashback only (inference path).
-    * Q1/Q2/Q3 encoders + 7 subset heads — Specific MI / U/S auxiliary training.
-    * Q1 may share Flashback's POI embedding when ``share_poi_embedding=True``.
+    记号：B=batch，L=历史长，K=num_pois，d=hidden_dim。
+
+    ``forward(batch)`` 主要输出::
+
+        rec_logits              [B, K]     # Flashback 下一站分数
+        h1,h2,h3 / source_hs    各 [B, d]  # 三个信息源向量
+        subset_logits["Q1"] …   各 [B, K]  # 7 个头
+        single_source_logits    Q1/Q2/Q3 → [B, K]
+        multi_source_logits     Q1_Q2…   → [B, K]
+
+    ``recommend(batch)`` → 仅 ``[B, K]``（推理只用 Flashback，不查 SURD 权重）。
     """
 
     def __init__(
@@ -76,19 +84,19 @@ class SURDGuidedPOIModel(nn.Module):
         )
 
     def encode_sources(self, batch: NextPOIBatch) -> list[torch.Tensor]:
-        """Q1 history, Q2 time, Q3 space — used only for SURD subset heads."""
+        """侧路三源：各返回 [B, d]，只给 SURD 子集头用。"""
         h1 = self.history_encoder(batch.history_poi_ids, batch.history_lengths, batch.history_mask)
         h2 = self.temporal_encoder(batch.target_time_features)
         h3 = self.spatial_encoder(batch.spatial_features)
-        return [h1, h2, h3]
+        return [h1, h2, h3]  # 三个 [B, d]
 
     def encode(self, batch: NextPOIBatch) -> list[torch.Tensor]:
         """Alias for Phase-A trainer code."""
         return self.encode_sources(batch)
 
     def forward(self, batch: NextPOIBatch, compute_subsets: bool = True) -> Dict[str, object]:
-        rec_logits, _, _ = self.backbone(batch)
-        hs = self.encode_sources(batch)
+        rec_logits, _, _ = self.backbone(batch)  # [B, K]
+        hs = self.encode_sources(batch)  # [h1,h2,h3] 各 [B, d]
         out: Dict[str, object] = {
             "rec_logits": rec_logits,
             "source_hs": hs,
@@ -97,13 +105,13 @@ class SURDGuidedPOIModel(nn.Module):
             "h3": hs[2],
         }
         if compute_subsets:
-            subset_logits = self.subset_estimators(hs)
+            subset_logits = self.subset_estimators(hs)  # 7 × [B, K]
             out["subset_logits"] = subset_logits
             out["single_source_logits"] = self.subset_estimators.single_source_logits(subset_logits)
             out["multi_source_logits"] = self.subset_estimators.multi_source_logits(subset_logits)
         return out
 
     def recommend(self, batch: NextPOIBatch) -> torch.Tensor:
-        """Inference: Flashback only (no label-dependent SURD weights)."""
+        """推理：只要 Flashback logits [B, K]。"""
         logits, _, _ = self.backbone(batch)
         return logits
