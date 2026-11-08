@@ -10,7 +10,9 @@ import torch
 from .preprocessing import NextPOISample
 
 
-TIME_FEATURE_DIM = 8
+TIME_FEATURE_DIM = 8  # 目标时刻日历特征（hour/dow/month…）
+# 历史每一步：8 维日历 + 2 维相对目标的 Δt（log1p 小时、天）
+HISTORY_TIME_FEATURE_DIM = 10
 SPATIAL_FEATURE_DIM = 12
 USER_FEATURE_DIM = 6
 

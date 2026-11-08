@@ -118,6 +118,8 @@ CSV 搜索顺序：`data.data_dir` → `Massive-STEPS/data/{city}/` → HF 缓�
 
 推理路径：`SURDGuidedPOIModel.recommend` → **只走 Flashback**，不查真实标签权重。
 
+**Q2 时间编码：** 不只看目标时刻。历史每一步用日历特征 + 相对目标的 Δt（`[B,L,10]`），经 GRU 得到 `h_hist`；目标 8 维经 MLP 得到 `h_tgt`；再 concat 融合成 Q2 向量。
+
 ---
 
 ## 5. SURD 如何“包”在 Flashback 外面？
@@ -128,7 +130,7 @@ Massive-STEPS official batch
         ├──────────────────────────────► Flashback backbone ──► rec_logits  (= L_rec)
         │
         ├─ Q1 HistoryEncoder (可共享 Flashback POI emb)
-        ├─ Q2 TemporalEncoder (目标时刻特征)
+        ├─ Q2 TemporalEncoder (历史时间序列 + 目标时刻 → 融合)
         └─ Q3 SpatialEncoder  (历史空间统计)
                  │
                  └─ 7 个子集概率头 → Specific MI → SURD assign

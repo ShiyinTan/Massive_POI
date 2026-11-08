@@ -45,6 +45,7 @@ class NextPOISample:
 
         history_poi_ids = [0, 3]          # vocab indices, not raw venue_id
         history_unix    = [1577854800.0, 1577865600.0]
+        history_time_features.shape = (2, 10)  # 每步日历+Δt
         target_poi_id   = 5
         target_time_features.shape = (8,)   # hour/dow/...
         spatial_features.shape     = (12,)
@@ -59,6 +60,8 @@ class NextPOISample:
     history_lons: List[float]
     # Unix seconds for Flashback temporal kernel (same as Flashback dataloader).
     history_unix: List[float]
+    # Q2 历史时间序列：[L, 10] = 日历 8 维 + 相对目标 Δt 2 维
+    history_time_features: np.ndarray
     target_poi_id: int
     target_timestamp: pd.Timestamp
     target_time_features: np.ndarray
@@ -95,6 +98,7 @@ def build_vocab_from_frames(frames: Mapping[str, pd.DataFrame]) -> Vocab:
 
 
 def _time_features(ts: pd.Timestamp) -> np.ndarray:
+    """目标/历史时刻的 8 维日历特征。"""
     hour = ts.hour + ts.minute / 60.0
     dow = int(ts.day_of_week)
     month = ts.month
@@ -112,6 +116,29 @@ def _time_features(ts: pd.Timestamp) -> np.ndarray:
         ],
         dtype=np.float32,
     )
+
+
+def _history_time_features(
+    hist_ts: Sequence[pd.Timestamp],
+    target_ts: pd.Timestamp,
+) -> np.ndarray:
+    """历史每一步相对目标时刻的时间特征 → [L, 10]。
+
+    每步 = 8 维日历特征 + [log1p(Δ小时), Δ小时/24]。
+    """
+    if not hist_ts:
+        return np.zeros((0, 10), dtype=np.float32)
+    rows = []
+    target_sec = float(target_ts.value // 10**9)
+    for ts in hist_ts:
+        cal = _time_features(ts)
+        delta_h = max(0.0, (target_sec - float(ts.value // 10**9)) / 3600.0)
+        rows.append(
+            np.concatenate(
+                [cal, np.array([math.log1p(delta_h), delta_h / 24.0], dtype=np.float32)]
+            )
+        )
+    return np.stack(rows, axis=0)
 
 
 def _haversine_km(lat1, lon1, lat2, lon2) -> float:
@@ -266,6 +293,7 @@ def build_samples_from_split(
                     history_lats=hist_lats,
                     history_lons=hist_lons,
                     history_unix=hist_unix,
+                    history_time_features=_history_time_features(hist_ts, target_ts),
                     target_poi_id=poi_ids[t],
                     target_timestamp=target_ts,
                     target_time_features=_time_features(target_ts),

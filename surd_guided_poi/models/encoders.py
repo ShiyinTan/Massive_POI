@@ -68,22 +68,74 @@ class HistoryEncoder(nn.Module):
 
 
 class TemporalEncoder(nn.Module):
-    """Q2 时间：目标时刻特征 → 向量。
+    """Q2 时间：历史时间序列 + 目标时刻 → 融合向量。
 
-    输入 ``time_features`` [B, 8]；输出 ``h2`` [B, hidden_dim]。
+    输入::
+
+        history_time_features  [B, L, D_t]  # D_t=10：日历 8 + Δt 2
+        lengths                [B]
+        mask                   [B, L]
+        target_time_features   [B, 8]
+
+    流程::
+
+        每步 Linear → GRU（mask-aware）→ h_hist [B, d]
+        目标 8 维 → MLP → h_tgt [B, d]
+        concat(h_hist, h_tgt) → MLP → h2 [B, d]
     """
 
-    def __init__(self, in_dim: int = 8, hidden_dim: int = 64, dropout: float = 0.1):
+    def __init__(
+        self,
+        hist_in_dim: int = 10,
+        tgt_in_dim: int = 8,
+        hidden_dim: int = 64,
+        dropout: float = 0.1,
+    ):
         super().__init__()
-        self.net = nn.Sequential(
-            nn.Linear(in_dim, hidden_dim),
+        self.hist_in = nn.Linear(hist_in_dim, hidden_dim)
+        self.hist_gru = nn.GRU(
+            input_size=hidden_dim,
+            hidden_size=hidden_dim,
+            num_layers=1,
+            batch_first=True,
+        )
+        self.tgt_net = nn.Sequential(
+            nn.Linear(tgt_in_dim, hidden_dim),
             nn.ReLU(),
             nn.Dropout(dropout),
             nn.Linear(hidden_dim, hidden_dim),
         )
+        self.fuse = nn.Sequential(
+            nn.Linear(2 * hidden_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(hidden_dim, hidden_dim),
+        )
+        self.dropout = nn.Dropout(dropout)
 
-    def forward(self, time_features: torch.Tensor) -> torch.Tensor:
-        return self.net(time_features)  # [B, 8] → [B, hidden]
+    def forward(
+        self,
+        history_time_features: torch.Tensor,
+        lengths: torch.Tensor,
+        mask: torch.Tensor,
+        target_time_features: torch.Tensor,
+    ) -> torch.Tensor:
+        # [B, L, D_t] → [B, L, d]
+        x = self.dropout(self.hist_in(history_time_features))
+        x = x * mask.unsqueeze(-1).to(dtype=x.dtype)
+        lengths_cpu = lengths.clamp(min=1).cpu()
+        packed = nn.utils.rnn.pack_padded_sequence(
+            x, lengths_cpu, batch_first=True, enforce_sorted=False
+        )
+        _, h_n = self.hist_gru(packed)
+        h_hist = h_n[-1]  # [B, d]
+        empty = lengths == 0
+        if empty.any():
+            h_hist = h_hist.clone()
+            h_hist[empty] = 0
+
+        h_tgt = self.tgt_net(target_time_features)  # [B, d]
+        return self.fuse(torch.cat([h_hist, h_tgt], dim=-1))  # [B, d]
 
 
 class SpatialEncoder(nn.Module):
