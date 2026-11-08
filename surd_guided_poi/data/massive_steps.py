@@ -39,11 +39,21 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 FLASHBACK_DIR = REPO_ROOT / "Massive-STEPS" / "Flashback"
 MASSIVE_STEPS_DATA = REPO_ROOT / "Massive-STEPS" / "data"
 
-# Flashback modules use bare imports (``from network import ...``).
-# Register that folder once; callers do not search or configure paths.
-_FLASHBACK_PATH = str(FLASHBACK_DIR)
-if _FLASHBACK_PATH not in sys.path:
-    sys.path.insert(0, _FLASHBACK_PATH)
+
+def add_flashback_dir_to_sys_path() -> Path:
+    """把固定的 ``Massive-STEPS/Flashback`` 加入 ``sys.path``（不做路径探测）。
+
+    Flashback 内部用裸名导入（``from network import ...`` / ``from dataloader import ...``），
+    因此调用方在 ``from network import ...`` 之前必须先调用本函数。
+    """
+    path = str(FLASHBACK_DIR)
+    if path not in sys.path:
+        sys.path.insert(0, path)
+    return FLASHBACK_DIR
+
+
+# 本模块加载时注册一次，供本文件内的 ``from dataloader import ...`` 使用
+add_flashback_dir_to_sys_path()
 
 CITY_HF_IDS = {
     "beijing": "CRUISEResearchGroup/Massive-STEPS-Beijing",
@@ -221,6 +231,7 @@ def load_flashback_poi_dataloader(
 
     Prefer ``load_official_split_frames`` + ``build_samples_from_split``.
     """
+    add_flashback_dir_to_sys_path()
     from dataloader import PoiDataloader  # type: ignore
 
     loader = PoiDataloader(max_users=max_users, min_checkins=min_checkins)

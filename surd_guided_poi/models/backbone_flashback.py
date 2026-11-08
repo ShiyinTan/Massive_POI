@@ -13,11 +13,11 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-# Registers Massive-STEPS/Flashback on sys.path (fixed relative layout).
-from ..data.massive_steps import FLASHBACK_DIR  # noqa: F401
 from ..data.dataset import NextPOIBatch
+from ..data.massive_steps import add_flashback_dir_to_sys_path
 
-# Bare imports — same style as Massive-STEPS/Flashback/train.py
+# 显式：先把 Massive-STEPS/Flashback 放进 sys.path，再按官方方式裸导入
+add_flashback_dir_to_sys_path()
 from network import Flashback, RnnFactory, create_h0_strategy  # type: ignore
 
 

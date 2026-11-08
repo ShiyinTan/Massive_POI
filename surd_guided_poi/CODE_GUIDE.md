@@ -74,7 +74,8 @@ surd_guided_poi/
 CSV 搜索顺序：`data.data_dir` → `Massive-STEPS/data/{city}/` → HF 缓存下载（`CRUISEResearchGroup/Massive-STEPS-*`）。
 
 **Flashback 代码位置是固定的**（不做路径探测）：始终是仓库内 `Massive-STEPS/Flashback/`。  
-`massive_steps.py` 在 import 时把该目录加入 `sys.path`，因此可以像官方 Flashback 一样写 `from network import Flashback` / `from dataloader import PoiDataloader`。类定义见：
+先调用 `add_flashback_dir_to_sys_path()`（在 `data/massive_steps.py`），再像官方一样 `from network import Flashback` / `from dataloader import PoiDataloader`。  
+`models/backbone_flashback.py` 顶部就是这种显式写法。类定义见：
 
 - `Massive-STEPS/Flashback/network.py`
 - `Massive-STEPS/Flashback/dataloader.py`
