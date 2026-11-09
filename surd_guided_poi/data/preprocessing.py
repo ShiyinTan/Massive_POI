@@ -45,10 +45,11 @@ class NextPOISample:
 
         history_poi_ids = [0, 3]          # vocab indices, not raw venue_id
         history_unix    = [1577854800.0, 1577865600.0]
-        history_time_features.shape = (2, 10)  # 每步日历+Δt
+        history_time_features.shape    = (2, 10)  # 每步日历+Δt
+        history_spatial_features.shape = (2, 6)   # 每步 lat/lon/步距…
         target_poi_id   = 5
         target_time_features.shape = (8,)   # hour/dow/...
-        spatial_features.shape     = (12,)
+        spatial_features.shape     = (12,)  # 历史轨迹汇总统计
     """
 
     sample_id: int
@@ -62,6 +63,8 @@ class NextPOISample:
     history_unix: List[float]
     # Q2 历史时间序列：[L, 10] = 日历 8 维 + 相对目标 Δt 2 维
     history_time_features: np.ndarray
+    # Q3 历史空间序列：[L, 6] = 每步坐标 + 步距/时差/位置
+    history_spatial_features: np.ndarray
     target_poi_id: int
     target_timestamp: pd.Timestamp
     target_time_features: np.ndarray
@@ -175,8 +178,62 @@ def _haversine_km(lat1, lon1, lat2, lon2) -> float:
     return 2 * r * math.asin(math.sqrt(min(1.0, a)))
 
 
+def _history_spatial_features(
+    hist_lats: Sequence[float],
+    hist_lons: Sequence[float],
+    hist_ts: Sequence[pd.Timestamp],
+) -> np.ndarray:
+    """历史每一步空间特征 → [L, 6]，供 Q3 SpatialEncoder 序列支路。
+
+    下标含义（不含目标点）::
+
+        0  lat / 90
+        1  lon / 180
+        2  missing_coord          # 该步缺坐标则 1
+        3  log1p(dist_prev_km)    # 与上一步大圆距离；首步/缺坐标为 0
+        4  log1p(hours_since_prev)# 与上一步时间差；首步为 0
+        5  step_index / max(L-1,1)# 窗口内相对位置 [0,1]
+    """
+    L = len(hist_lats)
+    if L == 0:
+        return np.zeros((0, 6), dtype=np.float32)
+    rows = []
+    denom = float(max(L - 1, 1))
+    for i in range(L):
+        la, lo = hist_lats[i], hist_lons[i]
+        missing = 1.0 if (
+            (isinstance(la, float) and math.isnan(la))
+            or (isinstance(lo, float) and math.isnan(lo))
+        ) else 0.0
+        lat_f = 0.0 if missing else float(la)
+        lon_f = 0.0 if missing else float(lo)
+        dist_prev = 0.0
+        hours_prev = 0.0
+        if i > 0:
+            d = _haversine_km(hist_lats[i - 1], hist_lons[i - 1], la, lo)
+            if not math.isnan(d):
+                dist_prev = d
+            hours_prev = max(
+                0.0, (hist_ts[i] - hist_ts[i - 1]).total_seconds() / 3600.0
+            )
+        rows.append(
+            np.array(
+                [
+                    lat_f / 90.0,  # 0
+                    lon_f / 180.0,  # 1
+                    missing,  # 2
+                    math.log1p(dist_prev),  # 3
+                    math.log1p(hours_prev),  # 4
+                    float(i) / denom,  # 5
+                ],
+                dtype=np.float32,
+            )
+        )
+    return np.stack(rows, axis=0)
+
+
 def _spatial_features(hist_lats, hist_lons, hist_ts) -> np.ndarray:
-    """历史轨迹空间统计 → 12 维，供 Q3 SpatialEncoder（不含目标点坐标）。
+    """历史轨迹空间**汇总** → 12 维，供 Q3 SpatialEncoder 汇总支路（不含目标点）。
 
     下标含义::
 
@@ -333,6 +390,9 @@ def build_samples_from_split(
                     history_lons=hist_lons,
                     history_unix=hist_unix,
                     history_time_features=_history_time_features(hist_ts, target_ts),
+                    history_spatial_features=_history_spatial_features(
+                        hist_lats, hist_lons, hist_ts
+                    ),
                     target_poi_id=poi_ids[t],
                     target_timestamp=target_ts,
                     target_time_features=_time_features(target_ts),

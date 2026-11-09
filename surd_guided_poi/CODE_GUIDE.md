@@ -120,6 +120,8 @@ CSV 搜索顺序：`data.data_dir` → `Massive-STEPS/data/{city}/` → HF 缓�
 
 **Q2 时间编码：** 不只看目标时刻。历史每一步用日历特征 + 相对目标的 Δt（`[B,L,10]`），经 GRU 得到 `h_hist`；目标 8 维经 MLP 得到 `h_tgt`；再 concat 融合成 Q2 向量。
 
+**Q3 空间编码：** 对称于 Q2。历史每一步用坐标/缺测/步距/时差/相对位置（`[B,L,6]`），经 GRU 得到 `h_seq`；另有 12 维历史汇总统计经 MLP 得到 `h_sum`；再 concat 融合成 Q3 向量。
+
 ---
 
 ## 5. SURD 如何“包”在 Flashback 外面？
@@ -131,7 +133,7 @@ Massive-STEPS official batch
         │
         ├─ Q1 HistoryEncoder (可共享 Flashback POI emb)
         ├─ Q2 TemporalEncoder (历史时间序列 + 目标时刻 → 融合)
-        └─ Q3 SpatialEncoder  (历史空间统计)
+        └─ Q3 SpatialEncoder  (历史空间序列 + 12 维汇总 → 融合)
                  │
                  └─ 7 个子集概率头 → Specific MI → SURD assign
                          │

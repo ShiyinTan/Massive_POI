@@ -20,6 +20,7 @@ def _fake_batch(B=4, L=5, num_pois=10):
         history_unix=torch.linspace(1e9, 1e9 + 3600 * L, L).unsqueeze(0).expand(B, L).float(),
         history_coords=torch.randn(B, L, 2),
         history_time_features=torch.randn(B, L, 10),
+        history_spatial_features=torch.randn(B, L, 6),
         target_time_features=torch.randn(B, 8),
         spatial_features=torch.randn(B, 12),
         user_features=torch.randn(B, 6),

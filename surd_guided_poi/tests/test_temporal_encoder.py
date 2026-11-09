@@ -58,6 +58,7 @@ def test_collate_pads_history_time_features():
                 history_lons=[0.0] * L,
                 history_unix=[float(t.value // 10**9) for t in hist_ts],
                 history_time_features=_history_time_features(hist_ts, ts),
+                history_spatial_features=np.zeros((L, 6), dtype=np.float32),
                 target_poi_id=1,
                 target_timestamp=ts,
                 target_time_features=np.zeros(8, dtype=np.float32),

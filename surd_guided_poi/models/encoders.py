@@ -142,26 +142,77 @@ class TemporalEncoder(nn.Module):
 
 
 class SpatialEncoder(nn.Module):
-    """Q3 空间：历史位置统计 → 向量（不含目标点）。
+    """Q3 空间：历史位置序列 + 12 维汇总 → 融合向量（不含目标点）。
 
-    输入 ``spatial_features`` [B, 12]（``_spatial_features``）::
+    输入张量::
 
-        0–1 最后一点 lat/lon（/90,/180）；2–3 历史均值 lat/lon
-        4–5 历史 lat/lon 标准差；6–7 log1p(平均/最大步距 km)
-        8 log1p(均值→末点位移 km)；9 log1p(历史时间跨度小时)
-        10 历史步数；11 末点缺坐标标记 0/1
+        history_spatial_features  [B, L, 6]
+        lengths / mask            [B] / [B, L]
+        spatial_features          [B, 12]
 
-    输出 ``h3`` [B, hidden_dim]。
+    历史每步 6 维（``_history_spatial_features``）::
+
+        0–1 lat/lon 归一化；2 缺坐标；3 log1p(距上一步 km)
+        4 log1p(距上一步小时)；5 窗口内相对位置
+
+    汇总 12 维（``_spatial_features``）::
+
+        0–1 末点 lat/lon；2–3 均值；4–5 标准差
+        6–7 log1p(平均/最大步距)；8 log1p(位移)；9 log1p(跨度小时)
+        10 步数；11 末点缺坐标
+
+    流程：每步 Linear→GRU → h_seq；汇总 MLP → h_sum；concat 融合 → h3 [B, d]。
     """
 
-    def __init__(self, in_dim: int = 12, hidden_dim: int = 64, dropout: float = 0.1):
+    def __init__(
+        self,
+        hist_in_dim: int = 6,
+        summary_in_dim: int = 12,
+        hidden_dim: int = 64,
+        dropout: float = 0.1,
+    ):
         super().__init__()
-        self.net = nn.Sequential(
-            nn.Linear(in_dim, hidden_dim),
+        self.hist_in = nn.Linear(hist_in_dim, hidden_dim)
+        self.hist_gru = nn.GRU(
+            input_size=hidden_dim,
+            hidden_size=hidden_dim,
+            num_layers=1,
+            batch_first=True,
+        )
+        self.summary_net = nn.Sequential(
+            nn.Linear(summary_in_dim, hidden_dim),
             nn.ReLU(),
             nn.Dropout(dropout),
             nn.Linear(hidden_dim, hidden_dim),
         )
+        self.fuse = nn.Sequential(
+            nn.Linear(2 * hidden_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(hidden_dim, hidden_dim),
+        )
+        self.dropout = nn.Dropout(dropout)
 
-    def forward(self, spatial_features: torch.Tensor) -> torch.Tensor:
-        return self.net(spatial_features)  # [B, 12] → [B, hidden]
+    def forward(
+        self,
+        history_spatial_features: torch.Tensor,
+        lengths: torch.Tensor,
+        mask: torch.Tensor,
+        spatial_features: torch.Tensor,
+    ) -> torch.Tensor:
+        # [B, L, D_s] → [B, L, d]
+        x = self.dropout(self.hist_in(history_spatial_features))
+        x = x * mask.unsqueeze(-1).to(dtype=x.dtype)
+        lengths_cpu = lengths.clamp(min=1).cpu()
+        packed = nn.utils.rnn.pack_padded_sequence(
+            x, lengths_cpu, batch_first=True, enforce_sorted=False
+        )
+        _, h_n = self.hist_gru(packed)
+        h_seq = h_n[-1]  # [B, d]
+        empty = lengths == 0
+        if empty.any():
+            h_seq = h_seq.clone()
+            h_seq[empty] = 0
+
+        h_sum = self.summary_net(spatial_features)  # [B, d]
+        return self.fuse(torch.cat([h_seq, h_sum], dim=-1))  # [B, d]
