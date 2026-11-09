@@ -70,18 +70,21 @@ class HistoryEncoder(nn.Module):
 class TemporalEncoder(nn.Module):
     """Q2 时间：历史时间序列 + 目标时刻 → 融合向量。
 
-    输入::
+    输入张量::
 
-        history_time_features  [B, L, D_t]  # D_t=10：日历 8 + Δt 2
-        lengths                [B]
-        mask                   [B, L]
+        history_time_features  [B, L, 10]
+        lengths / mask         [B] / [B, L]
         target_time_features   [B, 8]
 
-    流程::
+    目标 8 维（``_time_features``）::
 
-        每步 Linear → GRU（mask-aware）→ h_hist [B, d]
-        目标 8 维 → MLP → h_tgt [B, d]
-        concat(h_hist, h_tgt) → MLP → h2 [B, d]
+        0–1 小时 sin/cos；2–3 星期 sin/cos；4 周末；5–6 月份 sin/cos；7 hour/24
+
+    历史每步 10 维（``_history_time_features``）::
+
+        0–7 同上（该历史步日历）；8 log1p(Δ小时相对目标)；9 Δ小时/24
+
+    流程：每步 Linear→GRU → h_hist；目标 MLP → h_tgt；concat 融合 → h2 [B, d]。
     """
 
     def __init__(
@@ -139,9 +142,16 @@ class TemporalEncoder(nn.Module):
 
 
 class SpatialEncoder(nn.Module):
-    """Q3 空间：历史位置统计特征 → 向量。
+    """Q3 空间：历史位置统计 → 向量（不含目标点）。
 
-    输入 ``spatial_features`` [B, 12]；输出 ``h3`` [B, hidden_dim]。
+    输入 ``spatial_features`` [B, 12]（``_spatial_features``）::
+
+        0–1 最后一点 lat/lon（/90,/180）；2–3 历史均值 lat/lon
+        4–5 历史 lat/lon 标准差；6–7 log1p(平均/最大步距 km)
+        8 log1p(均值→末点位移 km)；9 log1p(历史时间跨度小时)
+        10 历史步数；11 末点缺坐标标记 0/1
+
+    输出 ``h3`` [B, hidden_dim]。
     """
 
     def __init__(self, in_dim: int = 12, hidden_dim: int = 64, dropout: float = 0.1):
