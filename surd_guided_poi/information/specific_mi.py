@@ -32,15 +32,38 @@ def estimate_specific_mi(
     eps: float = 1e-12,
     units: str = "nats",
 ) -> Tuple[Dict[str, np.ndarray], np.ndarray]:
-    """
-    Parameters
-    ----------
+    """在估计 holdout 上算每个 POI 的 Specific MI ``\\tilde{i}(y; Q_A)``。
+
+    公式（对子集 A、标签 y）::
+
+        \\tilde{i}(y; Q_A) = E[ log P_A(Y=y | Q_A) − log P(Y=y) | Y=y ]
+
+    即：只在「真实下一站是 y」的估计样本上，对 log 概率比取平均。
+
+    输入
+    ----
     subset_probs:
-        Mapping subset_key -> array [N, K] of P_A(Y | Q_A) on estimation samples.
+        ``dict[subset_key → ndarray]``。键如 ``"Q1"`` / ``"Q1_Q2"`` / ``"Q1_Q2_Q3"``。
+        每个值形状 ``[N, K]``：估计集上子集头给出的 ``P_A(Y | Q_A)``（行和≈1）。
+        ``N``=估计样本数，``K``=POI 数。
     labels:
-        Target POI indices, shape [N].
+        形状 ``[N]`` 的 int：每条估计样本的真实 ``target_poi_id``（∈ ``0..K-1``）。
     poi_prior:
-        Training prior P(Y=y) = N_y / N, shape [K] (not 1/K).
+        形状 ``[K]``：训练先验 ``P(Y=y)=N_y/N``（来自 model-train，**不是**均匀 1/K）。
+        用作分母；与 ``poi_sample_counts``（原始次数）不同。
+    eps / units:
+        概率下截断；``"nats"``（``log``）或 ``"bits"``（``log2``）。
+
+    输出
+    ----
+    specific:
+        ``dict[subset_key → ndarray[K]]``。``specific[key][y]`` = 该子集下 POI y 的
+        Specific MI；估计集上从未出现的 y 保持 ``0``。
+    counts:
+        形状 ``[K]`` 的 int：估计集上各 y 出现次数（``bincount(labels)``），供后续
+        权重 shrink / 诊断，不是 prior。
+
+    注意：应在与拟合子集头不同的样本上调用（见 ``carve_estimator_holdout``）。
     """
     np_log, _ = _log_base(units)
     labels = np.asarray(labels, dtype=np.int64)

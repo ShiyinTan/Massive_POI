@@ -9,7 +9,11 @@ import numpy as np
 import torch
 from torch.utils.data import Dataset
 
-from .feature_builder import HISTORY_TIME_FEATURE_DIM, pad_history
+from .feature_builder import (
+    HISTORY_SPATIAL_FEATURE_DIM,
+    HISTORY_TIME_FEATURE_DIM,
+    pad_history,
+)
 from .preprocessing import NextPOISample
 
 
@@ -19,18 +23,19 @@ class NextPOIBatch:
 
     Shapes (B=batch, L=max history in batch)::
 
-        history_poi_ids         [B, L]
-        history_lengths         [B]
-        history_mask            [B, L]
-        history_unix            [B, L]       # Flashback
-        history_coords          [B, L, 2]
-        history_time_features   [B, L, 10]   # Q2：每步日历+Δt
-        target_time_features    [B, 8]       # Q2：目标时刻
-        spatial_features        [B, 12]
-        user_features           [B, ...]
-        target_poi_id           [B]
-        user_id                 [B]
-        sample_id               [B]
+        history_poi_ids            [B, L]
+        history_lengths            [B]
+        history_mask               [B, L]
+        history_unix               [B, L]       # Flashback
+        history_coords             [B, L, 2]
+        history_time_features      [B, L, 10]   # Q2：每步日历+Δt
+        history_spatial_features   [B, L, 6]    # Q3：每步坐标+步距
+        target_time_features       [B, 8]       # Q2：目标时刻
+        spatial_features           [B, 12]      # Q3：历史汇总统计
+        user_features              [B, ...]
+        target_poi_id              [B]
+        user_id                    [B]
+        sample_id                  [B]
     """
 
     history_poi_ids: torch.Tensor  # [B, L]
@@ -39,8 +44,9 @@ class NextPOIBatch:
     history_unix: torch.Tensor  # [B, L] Flashback temporal kernel
     history_coords: torch.Tensor  # [B, L, 2]
     history_time_features: torch.Tensor  # [B, L, 10]
+    history_spatial_features: torch.Tensor  # [B, L, 6]
     target_time_features: torch.Tensor  # [B, 8]
-    spatial_features: torch.Tensor
+    spatial_features: torch.Tensor  # [B, 12]
     user_features: torch.Tensor
     target_poi_id: torch.Tensor
     user_id: torch.Tensor
@@ -79,6 +85,7 @@ def collate_next_poi(batch: List[NextPOISample]) -> NextPOIBatch:
     unix = torch.zeros(B, L, dtype=torch.float32)
     coords = torch.zeros(B, L, 2, dtype=torch.float32)
     hist_time = torch.zeros(B, L, HISTORY_TIME_FEATURE_DIM, dtype=torch.float32)
+    hist_spatial = torch.zeros(B, L, HISTORY_SPATIAL_FEATURE_DIM, dtype=torch.float32)
     for i, s in enumerate(batch):
         h = s.history_unix[-L:]
         unix[i, : len(h)] = torch.tensor(h, dtype=torch.float32)
@@ -87,6 +94,11 @@ def collate_next_poi(batch: List[NextPOISample]) -> NextPOIBatch:
             ht = ht.reshape(1, -1)
         ht = ht[-L:]
         hist_time[i, : ht.shape[0]] = torch.from_numpy(ht)
+        hs = np.asarray(s.history_spatial_features, dtype=np.float32)
+        if hs.ndim == 1:
+            hs = hs.reshape(1, -1)
+        hs = hs[-L:]
+        hist_spatial[i, : hs.shape[0]] = torch.from_numpy(hs)
         la = s.history_lats[-L:]
         lo = s.history_lons[-L:]
         for j, (a, b) in enumerate(zip(la, lo)):
@@ -99,6 +111,7 @@ def collate_next_poi(batch: List[NextPOISample]) -> NextPOIBatch:
         history_unix=unix,
         history_coords=coords,
         history_time_features=hist_time,
+        history_spatial_features=hist_spatial,
         target_time_features=torch.tensor(
             np.stack([s.target_time_features for s in batch], axis=0), dtype=torch.float32
         ),

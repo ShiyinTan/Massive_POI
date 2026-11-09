@@ -24,7 +24,12 @@ TIME_FEATURE_DIM = 8
 #   8: log1p(Δ小时)      9: Δ小时/24
 HISTORY_TIME_FEATURE_DIM = 10
 
-# 空间 12 维（_spatial_features，由历史轨迹统计，不含目标点）:
+# 历史每一步 6 维（_history_spatial_features）:
+#   0: lat/90  1: lon/180  2: missing
+#   3: log1p(距上一步 km)  4: log1p(距上一步小时)  5: i/max(L-1,1)
+HISTORY_SPATIAL_FEATURE_DIM = 6
+
+# 空间汇总 12 维（_spatial_features，历史轨迹统计，不含目标点）:
 #   0: last_lat/90       1: last_lon/180
 #   2: mean_lat/90       3: mean_lon/180
 #   4: std_lat           5: std_lon

@@ -9,6 +9,7 @@ import torch.nn as nn
 
 from ..data.dataset import NextPOIBatch
 from ..data.feature_builder import (
+    HISTORY_SPATIAL_FEATURE_DIM,
     HISTORY_TIME_FEATURE_DIM,
     SPATIAL_FEATURE_DIM,
     TIME_FEATURE_DIM,
@@ -81,7 +82,10 @@ class SURDGuidedPOIModel(nn.Module):
             dropout=dropout,
         )
         self.spatial_encoder = SpatialEncoder(
-            in_dim=SPATIAL_FEATURE_DIM, hidden_dim=hidden_dim, dropout=dropout
+            hist_in_dim=HISTORY_SPATIAL_FEATURE_DIM,
+            summary_in_dim=SPATIAL_FEATURE_DIM,
+            hidden_dim=hidden_dim,
+            dropout=dropout,
         )
         self.subset_estimators = SubsetEstimators(
             hidden_dim=hidden_dim,
@@ -100,7 +104,13 @@ class SURDGuidedPOIModel(nn.Module):
             batch.history_mask,
             batch.target_time_features,
         )
-        h3 = self.spatial_encoder(batch.spatial_features)
+        # Q3：历史空间序列 [B,L,6] + 汇总 [B,12] → h3 [B,d]
+        h3 = self.spatial_encoder(
+            batch.history_spatial_features,
+            batch.history_lengths,
+            batch.history_mask,
+            batch.spatial_features,
+        )
         return [h1, h2, h3]  # 三个 [B, d]
 
     def encode(self, batch: NextPOIBatch) -> list[torch.Tensor]:
