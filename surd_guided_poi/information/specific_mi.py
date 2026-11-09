@@ -122,21 +122,41 @@ def collect_subset_probs(
     device: torch.device,
     temperature: Optional[Dict[str, float]] = None,
 ) -> Tuple[Dict[str, np.ndarray], np.ndarray]:
-    """Run subset heads over a loader; return probs per subset and labels."""
+    """跑一遍 loader，收集 7 个子集头的 ``P_A(Y|Q_A)`` 与真实标签。
+
+    何时调用
+    --------
+    Phase A（``AlternatingTrainer.refresh_surd``）：子集头刚 fit 完后，在
+    **estimation holdout** loader 上调用；输出直接喂给 ``estimate_specific_mi``。
+    不做梯度（``@torch.no_grad`` + ``model.eval``）。
+
+    收集什么
+    --------
+    - 每个子集键（``"Q1"`` … ``"Q1_Q2_Q3"``）上，模型 ``subset_logits`` → softmax
+      得到条件概率。
+    - 可选 ``temperature[key]``：先把 logits 除以温度再 softmax（校准用）。
+    - 同步拼接各 batch 的 ``target_poi_id``。
+
+    形状（``N``=loader 样本总数，``K``=num_pois）
+    -----------------------------------------------
+    - 返回 ``probs``: ``dict[subset_key → ndarray[N, K]]``，行和≈1
+    - 返回 ``labels``: ``ndarray[N]``，真实下一站 POI id
+    """
     model.eval()
     all_logits: Dict[str, list] = {}
     labels: list = []
     for batch in loader:
         batch = batch.to(device)
         out = model(batch, compute_subsets=True)
+        # 7 个头：每批 logits [B, K]
         subset_logits: Dict[str, torch.Tensor] = out["subset_logits"]  # type: ignore
         for k, logits in subset_logits.items():
             all_logits.setdefault(k, []).append(logits.detach().cpu())
         labels.append(batch.target_poi_id.detach().cpu())
-    label_arr = torch.cat(labels, dim=0).numpy()
+    label_arr = torch.cat(labels, dim=0).numpy()  # [N]
     probs: Dict[str, np.ndarray] = {}
     for k, chunks in all_logits.items():
-        logits = torch.cat(chunks, dim=0)
+        logits = torch.cat(chunks, dim=0)  # [N, K]
         if temperature and k in temperature:
             logits = logits / float(temperature[k])
         probs[k] = F.softmax(logits, dim=-1).numpy().astype(np.float64)

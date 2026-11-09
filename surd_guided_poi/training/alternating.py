@@ -149,6 +149,7 @@ class AlternatingSURDTrainer:
     def refresh_surd(self, tag: str) -> Dict[str, Any]:
         """Phase A：估 Specific MI → SURD → 建成训练用的 U/S 权重（不反传）。"""
         self.fit_subset_estimators()
+        # 估计 holdout 上收集 7 子集 P(Y|Q_A)[N,K] + labels[N] → 再估 Specific MI
         probs, labels = collect_subset_probs(self.model, self.estimation_loader, self.device)
         calib = summarize_calibration(probs, labels)
         # prior 进 MI 分母；返回的 counts 是估计集上的整数 N_y（给 fallback）
