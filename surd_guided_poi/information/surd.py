@@ -66,8 +66,8 @@ def assign_surd_from_specific_mi(
     Parameters
     ----------
     specific_mi:
-        Mapping subset_key ('Q1', 'Q1_Q2', ...) -> array [num_pois] of
-        specific information values (already monotone-projected if desired).
+        键为 subset_key（如 'Q1'、'Q1_Q2'、'Q1_Q2_Q3'）→ [num_pois] 的
+        specific information（宜先做过单调投影）。
 
     Returns
     -------

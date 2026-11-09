@@ -24,6 +24,17 @@ SUBSET_NAMES: List[Tuple[str, ...]] = all_subsets()
 
 
 def subset_key(subset: Iterable[str]) -> str:
+    """把子集元组编成字典键字符串。
+
+    例::
+
+        ("Q1",)           → "Q1"
+        ("Q1", "Q2")      → "Q1_Q2"
+        ("Q1", "Q2", "Q3")→ "Q1_Q2_Q3"
+
+    由有序元组用 ``"_"`` 拼接而成（顺序与 ``SOURCE_NAMES`` / ``all_subsets`` 一致）。
+    用作：子集头 ``ModuleDict`` 名、specific-MI / SURD / 权重表的键、辅助损失里查 logits。
+    """
     return "_".join(subset)
 
 
@@ -77,7 +88,7 @@ class SubsetEstimators(nn.Module):
         name_to_idx = {n: i for i, n in enumerate(self.source_names)}
         self._subset_indices: Dict[str, List[int]] = {}
         for subset in self.subsets:
-            key = subset_key(subset)
+            key = subset_key(subset)  # 如 "Q1" / "Q1_Q2"；作 ModuleDict 键
             in_dim = hidden_dim * len(subset)
             self.heads[key] = SubsetHead(in_dim, subset_hidden_dim, num_pois, dropout)
             self._subset_indices[key] = [name_to_idx[s] for s in subset]

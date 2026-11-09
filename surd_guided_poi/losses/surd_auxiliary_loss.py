@@ -38,6 +38,7 @@ def synergy_auxiliary_loss(
 ) -> torch.Tensor:
     """按 y 查 synergy 权重，加权多源组合头 CE（同样不是「纯 synergy 信息量」）。"""
     if subset_keys is None:
+        # 与多源头 / synergy 权重列顺序一致：'Q1_Q2', ...
         subset_keys = [subset_key(s) for s in SUBSET_NAMES if len(s) >= 2]
     w = synergy_weight_table[target]  # [B, num_multi]
     loss = target.new_zeros(())

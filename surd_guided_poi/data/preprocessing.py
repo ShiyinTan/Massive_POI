@@ -98,21 +98,33 @@ def build_vocab_from_frames(frames: Mapping[str, pd.DataFrame]) -> Vocab:
 
 
 def _time_features(ts: pd.Timestamp) -> np.ndarray:
-    """目标/历史时刻的 8 维日历特征。"""
+    """单时刻 8 维日历特征（目标时刻 / 历史每步共用）。
+
+    下标含义::
+
+        0  sin(2π·hour/24)     # 一天中的小时（周期）
+        1  cos(2π·hour/24)
+        2  sin(2π·dow/7)       # 星期几
+        3  cos(2π·dow/7)
+        4  weekend             # 是否周末 0/1
+        5  sin(2π·(month-1)/12)
+        6  cos(2π·(month-1)/12)
+        7  hour/24             # 线性小时 [0,1)
+    """
     hour = ts.hour + ts.minute / 60.0
     dow = int(ts.day_of_week)
     month = ts.month
     weekend = 1.0 if dow >= 5 else 0.0
     return np.array(
         [
-            math.sin(2 * math.pi * hour / 24.0),
-            math.cos(2 * math.pi * hour / 24.0),
-            math.sin(2 * math.pi * dow / 7.0),
-            math.cos(2 * math.pi * dow / 7.0),
-            weekend,
-            math.sin(2 * math.pi * (month - 1) / 12.0),
-            math.cos(2 * math.pi * (month - 1) / 12.0),
-            hour / 24.0,
+            math.sin(2 * math.pi * hour / 24.0),  # 0
+            math.cos(2 * math.pi * hour / 24.0),  # 1
+            math.sin(2 * math.pi * dow / 7.0),  # 2
+            math.cos(2 * math.pi * dow / 7.0),  # 3
+            weekend,  # 4
+            math.sin(2 * math.pi * (month - 1) / 12.0),  # 5
+            math.cos(2 * math.pi * (month - 1) / 12.0),  # 6
+            hour / 24.0,  # 7
         ],
         dtype=np.float32,
     )
@@ -122,20 +134,30 @@ def _history_time_features(
     hist_ts: Sequence[pd.Timestamp],
     target_ts: pd.Timestamp,
 ) -> np.ndarray:
-    """历史每一步相对目标时刻的时间特征 → [L, 10]。
+    """历史每一步时间特征 → [L, 10]，供 Q2 TemporalEncoder。
 
-    每步 = 8 维日历特征 + [log1p(Δ小时), Δ小时/24]。
+    每步 10 维 = ``_time_features`` 的 8 维日历 + 相对**预测目标时刻**的 Δt::
+
+        0..7  同 _time_features（该历史步自己的日历）
+        8     log1p(Δ小时)   # Δ = target − hist_step，≥0
+        9     Δ小时 / 24
     """
     if not hist_ts:
         return np.zeros((0, 10), dtype=np.float32)
     rows = []
     target_sec = float(target_ts.value // 10**9)
     for ts in hist_ts:
-        cal = _time_features(ts)
+        cal = _time_features(ts)  # 0..7
         delta_h = max(0.0, (target_sec - float(ts.value // 10**9)) / 3600.0)
         rows.append(
             np.concatenate(
-                [cal, np.array([math.log1p(delta_h), delta_h / 24.0], dtype=np.float32)]
+                [
+                    cal,
+                    np.array(
+                        [math.log1p(delta_h), delta_h / 24.0],  # 8, 9
+                        dtype=np.float32,
+                    ),
+                ]
             )
         )
     return np.stack(rows, axis=0)
@@ -154,6 +176,23 @@ def _haversine_km(lat1, lon1, lat2, lon2) -> float:
 
 
 def _spatial_features(hist_lats, hist_lons, hist_ts) -> np.ndarray:
+    """历史轨迹空间统计 → 12 维，供 Q3 SpatialEncoder（不含目标点坐标）。
+
+    下标含义::
+
+        0   last_lat / 90          # 最近一次历史打卡纬度（归一化）
+        1   last_lon / 180
+        2   mean_lat / 90          # 历史有效坐标均值
+        3   mean_lon / 180
+        4   std_lat                # 历史坐标标准差
+        5   std_lon
+        6   log1p(mean_step_km)    # 相邻步平均大圆距离
+        7   log1p(max_step_km)     # 相邻步最大距离
+        8   log1p(disp_km)         # 均值点 → 最后一点的位移
+        9   log1p(span_hours)      # 历史首尾时间跨度（小时）
+       10   history_len            # 历史步数
+       11   missing_last_coord     # 最后一点缺坐标则 1，否则 0
+    """
     last_lat, last_lon = hist_lats[-1], hist_lons[-1]
     valid = [
         (la, lo)
@@ -186,18 +225,18 @@ def _spatial_features(hist_lats, hist_lons, hist_ts) -> np.ndarray:
     missing_coord = 1.0 if (isinstance(last_lat, float) and math.isnan(last_lat)) else 0.0
     return np.array(
         [
-            last_lat_f / 90.0,
-            last_lon_f / 180.0,
-            mean_lat / 90.0,
-            mean_lon / 180.0,
-            std_lat,
-            std_lon,
-            math.log1p(mean_step),
-            math.log1p(max_step),
-            math.log1p(disp),
-            math.log1p(span_h),
-            float(len(hist_lats)),
-            missing_coord,
+            last_lat_f / 90.0,  # 0
+            last_lon_f / 180.0,  # 1
+            mean_lat / 90.0,  # 2
+            mean_lon / 180.0,  # 3
+            std_lat,  # 4
+            std_lon,  # 5
+            math.log1p(mean_step),  # 6
+            math.log1p(max_step),  # 7
+            math.log1p(disp),  # 8
+            math.log1p(span_h),  # 9
+            float(len(hist_lats)),  # 10
+            missing_coord,  # 11
         ],
         dtype=np.float32,
     )

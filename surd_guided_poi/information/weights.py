@@ -32,6 +32,7 @@ def build_poi_specific_weights(
 
     # 先算一份「全局平均」权重，给长尾 POI 当 fallback
     global_u = {n: 0.0 for n in SOURCE_NAMES}
+    # 多源键同 subset_key：'Q1_Q2' / 'Q1_Q3' / 'Q2_Q3' / 'Q1_Q2_Q3'
     global_s: Dict[str, float] = {
         subset_key(s): 0.0 for s in SUBSET_NAMES if len(s) >= 2
     }
