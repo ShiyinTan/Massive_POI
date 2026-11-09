@@ -79,12 +79,12 @@ def enforce_subset_monotonicity(
     """
     out: Dict[str, np.ndarray] = {}
     for subset in sorted(subsets, key=len):
-        key = subset_key(subset)
+        key = subset_key(subset)  # 'Q1' / 'Q1_Q2' / ...；与 specific_mi 字典对齐
         if key not in specific_mi:
             continue
         v = np.maximum(np.asarray(specific_mi[key], dtype=np.float64), 0.0)
         for smaller, smaller_v in out.items():
-            smaller_set = set(smaller.split("_"))
+            smaller_set = set(smaller.split("_"))  # 从键反推子集名
             if smaller_set < set(subset):
                 v = np.maximum(v, smaller_v)
         out[key] = v

@@ -187,7 +187,7 @@ class AlternatingSURDTrainer:
         out = self.output_dir / "surd" / tag
         out.mkdir(parents=True, exist_ok=True)
         # specific_mi.csv
-        keys = [subset_key(s) for s in SUBSET_NAMES]
+        keys = [subset_key(s) for s in SUBSET_NAMES]  # CSV 列名：Q1, Q1_Q2, ...
         with (out / "specific_mi.csv").open("w", newline="", encoding="utf-8") as f:
             w = csv.writer(f)
             w.writerow(["poi_id", "sample_count"] + keys)
