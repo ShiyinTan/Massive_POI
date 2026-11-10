@@ -20,7 +20,25 @@ from pc_smir.surd.profiles import ProfileArtifacts, crossfit_profiles
 
 
 def prepare_artifacts(cfg: dict[str, Any], force: bool = False) -> dict[str, Path]:
-    """Data prep → features → SURD profiles. Writes under cfg['output']['artifact_dir']."""
+    """Offline data prep: splits → vocab/catalog → examples → SURD profiles.
+
+    作用 / Role（训练循环之前的一次性离线流水线）:
+      1) 读官方 Massive-STEPS train/val/test CSV
+      2) 仅在 train 上 fit 词表，得到 catalog（真实 POI 模型 ID）
+      3) 把每条 trail 建成无泄漏的 next-POI Python examples
+      4) 离散化 Q1–Q4 并离线估计/交叉拟合 per-POI SURD profiles
+      5) 全部写入 ``cfg['output']['artifact_dir']``，供 Dataset/模型复用
+
+    幂等 / Idempotent:
+      若 ``examples.pkl`` 与 ``surd_profiles_full.json`` 已存在且 ``force=False``，
+      直接返回路径字典，**不重算**（所以 train.py 里再调一次通常很快）。
+
+    谁调用 / Callers:
+      - ``scripts/prepare_data.py``：只做准备，方便单独检查/缓存产物
+      - ``scripts/train.py``：训练前再调一次，保证 artifacts 齐全（已存在则跳过）
+      两者都调是刻意设计：prepare 可独立跑；train 可单入口自给自足。
+      不是“准备两遍重活”——第二次命中缓存后几乎只返回路径。
+    """
     city = cfg["data"]["city"]
     data_dir = Path(cfg["data"]["data_dir"])
     art_dir = Path(cfg["output"]["artifact_dir"])
@@ -35,6 +53,7 @@ def prepare_artifacts(cfg: dict[str, Any], force: bool = False) -> dict[str, Pat
         "surd_folds": art_dir / "surd_fold_profiles.pkl",
         "meta": art_dir / "prep_meta.json",
     }
+    # Cache hit: both entry scripts may call us; skip rebuild unless --force / --force-prep.
     if paths["examples"].exists() and paths["surd_full"].exists() and not force:
         return paths
 

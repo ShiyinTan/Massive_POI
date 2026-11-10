@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
-"""Train PC-SMIR on Massive-STEPS official splits."""
+"""Train PC-SMIR on Massive-STEPS official splits.
+
+训练前会调用一次 ``prepare_artifacts``（与 ``scripts/prepare_data.py`` 相同函数）：
+  - 若已跑过 prepare_data，这里通常直接复用 artifacts（不重算）。
+  - 若没跑过，这里会现场准备，这样 ``train.py`` 可单独作为端到端入口。
+用 ``--force-prep`` 才强制重建；默认不要把“两个脚本都调 prepare”理解成做了两遍重活。
+"""
 
 from __future__ import annotations
 
@@ -40,6 +46,8 @@ def main():
     cfg = _resolve(load_config([ROOT / p if not Path(p).is_absolute() else Path(p) for p in args.config]))
     set_seed(int(cfg.get("seed", 0)))
 
+    # Same prepare_artifacts as prepare_data.py: ensure offline artifacts exist (cached if present).
+    # 与 prepare_data.py 共用准备函数：产物已在则秒返回；--force-prep 才重建。
     paths = prepare_artifacts(cfg, force=args.force_prep)
     train_loader, val_loader, test_loader, vocab, surd_dim, catalog = build_dataloaders(cfg, paths)
     model = build_model(cfg, vocab, surd_dim)
