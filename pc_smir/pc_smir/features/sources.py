@@ -111,18 +111,39 @@ class SourceDiscretizer:
         return {"Q1": q1, "Q2": int(q2), "Q3": q3, "Q4": q4}
 
     def _q1_vector(self, ex: dict) -> np.ndarray:
-        """Continuous Q1 summary before clustering / 聚类前的偏好摘要向量 (48,)."""
+        """Continuous Q1 summary before clustering / 聚类前的偏好摘要向量 (48,).
+
+        两段拼接: ``cat_hist[32]`` + ``recent[16]`` → 再交给 KMeans 得到 Q1 簇 id。
+        目的是用固定短向量概括“常去什么类 + 最近去过哪些点”，避免对全量
+        类别/POI 做 one-hot（北京类别上百、POI 近五百，列联/聚类会很稀疏）。
+        """
         pois = ex["history_poi_ids"]
         cats = ex["history_categories"]
-        # Preference summary: normalized category histogram + recency-weighted POI hash features.
+
+        # ----- cat_hist：类别偏好的固定 32 桶直方图 -----
+        # 为何 % 32？
+        #   类别 id 可以很多（北京 train 词表 n_cats≈125），若按真实 id 开直方图，
+        #   维数会随词表变、且对 SURD 前的 KMeans 过碎。固定 32 维后：
+        #     桶下标 = category_id % 32
+        #   不同类别可能撞到同一桶（有意的信息压缩/哈希），换来稳定、短、可聚类的向量。
+        # 这段在做什么？统计历史里各类别出现比例（归一化后和为 1），描述长期/袋装偏好。
         cat_hist = np.zeros(32, dtype=np.float64)
         for c in cats:
             cat_hist[int(c) % 32] += 1.0
         if cat_hist.sum() > 0:
             cat_hist /= cat_hist.sum()
+
+        # ----- recent：最近至多 16 次访问的 POI“指纹” -----
+        # 为何 % 97 再 /97？
+        #   需要把每个 POI id 压成 [0,1) 的标量特征，而不是 498 维 one-hot。
+        #   ``poi_id % 97`` 用质数取模做轻量哈希，减少与 2 的幂对齐的结构性碰撞；
+        #   再除以 97 缩放到 [0,1)，方便与直方图一起做欧氏距离聚类。
+        # 这段在做什么？``recent[i]`` 对应历史末尾第 i 个位置上的 POI 指纹
+        #   （pois[-16:] 按时间顺序），刻画短时访问序列，而不展开全 catalog。
         recent = np.zeros(16, dtype=np.float64)
         for i, p in enumerate(pois[-16:]):
             recent[i] = (int(p) % 97) / 97.0
+
         return np.concatenate([cat_hist, recent]).astype(np.float64)
 
     def _q3_vector(self, ex: dict) -> np.ndarray:
