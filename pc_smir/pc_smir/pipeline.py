@@ -79,6 +79,14 @@ def prepare_artifacts(cfg: dict[str, Any], force: bool = False) -> dict[str, Pat
         for ex in split_ex:
             ex.pop("vocab", None)
 
+    # ----- Sources for SURD (离散信息源状态，不是神经网络 embedding) -----
+    # SourceDiscretizer（features/sources.py）只在 train examples 上 fit：
+    #   Q1: 历史类别直方图+近期 POI 摘要 → KMeans 簇 id
+    #   Q2: query_time 的 hour_bin × weekday/weekend（无需 KMeans）
+    #   Q3: 末位置/格子/位移等摘要 → KMeans 簇 id
+    #   Q4: stable_user_features[8] 标准化后 → KMeans 簇 id
+    # 输入: train dict examples（需临时挂回 vocab 供 spatial_cell_id）
+    # 输出: 拟合好的 disc；北京 smoke 常 n_clusters≈4–6，≈400 条 train 上 fit
     # Fit source discretizer on training examples (need vocab back for transform vectors).
     train_for_disc = []
     for ex in examples["train"]:
@@ -91,6 +99,14 @@ def prepare_artifacts(cfg: dict[str, Any], force: bool = False) -> dict[str, Pat
     ).fit(train_for_disc)
 
     def states_for(ex_list: list[dict]) -> tuple[np.ndarray, dict[str, np.ndarray], np.ndarray]:
+        """Map examples → (target_poi_ids, {Q1..Q4: state_ids}, query_timestamps).
+
+        把每条 example 变成 SURD 估计用的一行：
+          - targets[i] = 该例 target 的模型 POI id
+          - mats["Q*"][i] = 该例四个源的离散状态 id（transform_example）
+          - times[i] = 预测时刻（用于时间块交叉拟合）
+        北京 train: targets/mats 长度 ≈400；每个 Q* 为小整数类别。
+        """
         targets = []
         mats = {"Q1": [], "Q2": [], "Q3": [], "Q4": []}
         times = []
@@ -108,9 +124,21 @@ def prepare_artifacts(cfg: dict[str, Any], force: bool = False) -> dict[str, Pat
             np.asarray(times, dtype=np.float64),
         )
 
+    # 仅用 train 行估计 SURD（val/test 目标不得参与）。
     train_targets, train_states, train_times = states_for(examples["train"])
     catalog = sorted({p for p in vocab.id2poi if p >= 2})
 
+    # ----- Offline SURD profiles（前向里不再跑估计器）-----
+    # crossfit_profiles（surd/profiles.py）内部对每个 POI 调 estimate_surd
+    # （surd/estimator.py, mmi_pid_discrete_v1）：
+    #   输入: Y_p=1[target==p]，以及全体 train 行的 Q1–Q4 状态
+    #   输出原子: unique(Q_i)、pair/triple synergy、redundancy（冗余仅诊断）
+    #   再做 bootstrap SE、κ 收缩、robust 归一化 → 每 POI 一条特征向量
+    # 返回:
+    #   full  — 用全部 train 估的表，供 val/test 候选查找
+    #   folds — 每折只用其它/更早数据估的表，供训练防泄漏
+    #   fold_id[i] — 第 i 条 train example 所属时间块
+    # 北京: catalog≈498；smoke 常 n_folds=3、n_bootstrap=2（较慢步，故离线一次）
     surd_cfg = dict(cfg.get("surd", {}))
     full, folds, fold_id = crossfit_profiles(
         train_targets,
@@ -126,7 +154,9 @@ def prepare_artifacts(cfg: dict[str, Any], force: bool = False) -> dict[str, Pat
     with open(paths["discretizer"], "wb") as f:
         pickle.dump(disc, f)
 
-    # Attach per-example SURD for training via cross-fit fold profiles.
+    # 给每条 train example 挂上「其所在 fold 估出的」target POI 的 SURD 元数据（fold_id）。
+    # 真正喂模型的候选 SURD 向量在 Dataset 里按 candidate_poi_ids 查表填充
+    # （train 用折平均/折表，val·test 用 full）；这里不把全候选表打进每条 example。
     train_surd_feats = []
     train_surd_valid = []
     for i, ex in enumerate(examples["train"]):

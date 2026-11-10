@@ -273,10 +273,19 @@ def crossfit_profiles(
 ) -> tuple[ProfileArtifacts, list[ProfileArtifacts], np.ndarray]:
     """Forward-chaining / block cross-fit profiles for training rows.
 
-    Returns:
-      - full_train_profiles: for validation/test lookup
-      - fold_profiles: list length n_folds
-      - fold_id per example (for attaching the right profile at train time)
+    被 ``prepare_artifacts`` 调用。对 catalog 中每个 POI p，在给定行集合上估计
+    Y_p 相对 Q1–Q4 的 SURD 原子（经 ``estimate_profiles_for_rows`` → ``estimate_surd``）。
+
+    输入 / Inputs:
+      example_poi_targets: [N] 每条 train example 的 target 模型 POI id（北京 N≈400）
+      source_state_matrix: {"Q1".."Q4"} → [N] 离散状态
+      catalog_poi_ids: 要建 profile 的 POI 列表（北京≈498）
+      timestamps: 若给定，按时间切块做前向交叉拟合
+
+    返回 / Returns:
+      - full_train_profiles: 用全部 train 估的表 → val/test 候选查找
+      - fold_profiles: 长度 n_folds；第 k 折不含（或不晚于）折 k 的标签
+      - fold_id per example: 训练时选用哪张折表
     """
     n = len(example_poi_targets)
     if timestamps is not None:
