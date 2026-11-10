@@ -23,7 +23,11 @@ class SourceDiscretizer:
 
     fit(train examples) → 学 Q1/Q3/Q4 的 KMeans 与 Q4 标准化；Q2 用固定时间 bin。
     transform_example(ex) → {"Q1","Q2","Q3","Q4"} 整数状态。
-    北京 smoke: ~400 train 行，n_clusters 常 4–6。
+
+    北京 smoke（n_clusters=4）对象字段示例:
+      disc.q4_mean / q4_std: np.float32, shape (8,)
+      disc.q*_model.n_clusters_: 4
+      transform 一例: {"Q1": 1, "Q2": 6, "Q3": 2, "Q4": 1}
     """
 
     n_clusters: int = 8
