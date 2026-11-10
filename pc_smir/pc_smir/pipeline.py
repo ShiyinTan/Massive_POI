@@ -38,6 +38,8 @@ def prepare_artifacts(cfg: dict[str, Any], force: bool = False) -> dict[str, Pat
     if paths["examples"].exists() and paths["surd_full"].exists() and not force:
         return paths
 
+    # load_official_splits: 读官方 CSV → 真实划分数据（供后面建样本/词表）。
+    # split_manifest: 仅从上述 DataFrame 汇总计数与协议说明 → 写入审计 JSON，不改数据。
     splits = load_official_splits(city, data_dir, download=bool(cfg["data"].get("download", True)))
     with open(paths["manifest"], "w", encoding="utf-8") as f:
         json.dump(split_manifest(splits), f, indent=2)

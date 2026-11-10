@@ -1,4 +1,4 @@
-"""Massive-STEPS official split loading.
+"""Massive-STEPS official split loading / 官方划分加载。
 
 Official partitions are trail-level CSVs produced by
 `Massive-STEPS/src/create_next_poi_dataset.py`:
@@ -10,6 +10,11 @@ Official partitions are trail-level CSVs produced by
 Construction (upstream): stratified by user_id, test_size=0.2 then
 val_size=0.125 of remaining, random_state=42. This package never
 re-splits; it only consumes those official files (local or HuggingFace).
+
+两函数分工（do not confuse）:
+  - ``load_official_splits``: 真正读入划分数据（DataFrame），供训练/特征使用。
+  - ``split_manifest``: 只从已加载的 DataFrame 汇总元数据（计数、协议说明），
+    用于审计/落盘 JSON；不读盘、不重新划分、不改数据。
 """
 
 from __future__ import annotations
@@ -130,7 +135,17 @@ def _normalize_frame(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def load_official_splits(city: str, data_dir: str | Path, download: bool = True) -> dict[SplitName, pd.DataFrame]:
-    """Load Massive-STEPS official partitions. Never constructs custom random splits."""
+    """Load Massive-STEPS official partitions as DataFrames. Never custom-random-splits.
+
+    作用 / Role:
+      从官方 CSV（必要时先下载）读入 train/validation/test 签到表，做轻量规范化
+      （坐标回填、排序、去重、无效坐标过滤），并校验 trail_id 在各划分互不重叠。
+      返回的是**真实数据**：``dict[split_name -> pd.DataFrame]``，后续建样本、词表、
+      SURD 都依赖这里。
+
+    与 ``split_manifest`` 的区别 / vs ``split_manifest``:
+      本函数负责“加载数据”；``split_manifest`` 只在加载结果上做统计摘要，不读文件。
+    """
     data_dir = ensure_official_splits(city, data_dir, download=download)
     files = split_filenames(city)
     splits: dict[SplitName, pd.DataFrame] = {}
@@ -149,6 +164,20 @@ def load_official_splits(city: str, data_dir: str | Path, download: bool = True)
 
 
 def split_manifest(splits: dict[SplitName, pd.DataFrame]) -> dict:
+    """Build a JSON-serializable summary of already-loaded official splits.
+
+    作用 / Role:
+      输入必须是 ``load_official_splits`` 已经返回的 DataFrame 字典；对本函数而言
+      数据已在内存中。它只统计每个划分的行数/轨迹数/用户数/POI 数，并附上上游
+      官方划分协议说明（脚本名与分层参数），方便写入 ``split_manifest.json`` 做
+      可复现实验的审计记录。
+
+    与 ``load_official_splits`` 的区别 / vs ``load_official_splits``:
+      - ``load_official_splits`` → 读盘 + 规范化 + 完整性检查 → **数据**
+      - ``split_manifest`` → 不读盘、不重新划分、不修改表 → **元数据摘要**
+      典型用法：先 ``splits = load_official_splits(...)``，再
+      ``json.dump(split_manifest(splits), ...)``。
+    """
     return {
         split: {
             "n_rows": int(len(df)),
