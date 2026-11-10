@@ -14,8 +14,19 @@ from typing import Any
 import numpy as np
 from sklearn.cluster import KMeans
 
-from pc_smir.data.vocab import VocabMaps, haversine_m, spatial_cell_id
+from pc_smir.data.vocab import haversine_m, spatial_cell_id
 from pc_smir.features.temporal import day_type, hour_bin
+
+# Q1 continuous summary sizes (before KMeans).
+Q1_CAT_BINS = 32
+Q1_POI_BINS = 64
+# Multiplicative hash constant (Knuth) so consecutive poi_ids do not map to adjacent bins.
+_POI_HASH_MULT = 2654435761
+
+
+def _poi_bucket(poi_id: int, n_bins: int = Q1_POI_BINS) -> int:
+    """Map a model POI id → fixed bag bucket (visit-based hashing, not semantic)."""
+    return int((int(poi_id) * _POI_HASH_MULT) % n_bins)
 
 
 @dataclass
@@ -31,12 +42,12 @@ class SourceDiscretizer:
     ------------------------------------------------------------------
 
     **Q1 个人偏好 (Personal preference)**
-      - 长什么样: 先得到连续摘要向量 ``_q1_vector`` ∈ R^{48}
-        （32 维类别直方图 + 16 维近期 POI hash），再 KMeans → 整数簇 id。
+      - 长什么样: ``_q1_vector`` ∈ R^{96} = 全历史类别袋 ``cat_hist[32]``
+        + 全前缀 POI 访问袋 ``poi_bag[64]``（TF 占比），再 KMeans → 簇 id。
       - 怎么得到: 只用 example 的 ``history_poi_ids`` / ``history_categories``
-        （来自 dataset 的前缀，不含 target）。
-      - 为何: SURD 需要低基数类别；直接用 embedding 会随训练漂移且维数过高。
-        簇 id 把“相似偏好画像”归并，便于估 unique/synergy。
+        （来自 dataset 的前缀，不含 target）；**与访问顺序无关**。
+      - 为何: 用“去过什么/去过多少次”的 bag 相似度，而不是轨迹槽位上的 id 指纹；
+        SURD 需要低基数状态，KMeans 把相近访问画像归并。
 
     **Q2 时间上下文 (Temporal)**
       - 长什么样: 单个整数 ``hour_bin * 2 + day_type``。
@@ -111,50 +122,43 @@ class SourceDiscretizer:
         return {"Q1": q1, "Q2": int(q2), "Q3": q3, "Q4": q4}
 
     def _q1_vector(self, ex: dict) -> np.ndarray:
-        """Continuous Q1 summary before clustering / 聚类前的偏好摘要向量 (48,).
+        """Continuous Q1 summary before clustering / 聚类前的偏好摘要向量 (96,).
 
-        两段拼接: ``cat_hist[32]`` + ``recent[16]`` → 再交给 KMeans 得到 Q1 簇 id。
-        目的是用固定短向量概括“常去什么类 + 最近去过哪些点”，避免对全量
-        类别/POI 做 one-hot（北京类别上百、POI 近五百，列联/聚类会很稀疏）。
+        两段都是**全前缀访问袋（bag / TF 占比）**，对顺序不敏感：
+          ``cat_hist[32]`` + ``poi_bag[64]`` → KMeans → Q1 簇 id。
 
-        重要澄清 / Important:
-          - cat_id / poi_id 的数值大小**不表示语义相近**（只是词表编号）。
-          - ``% 32`` / ``% 97`` 是哈希压缩，不是度量学习 embedding；id=10 与 id=11
-            哈希后靠近，也不代表两个 POI/类别相似。
-          - KMeans 聚类的是**每条 example 的 48 维摘要向量**（跨样本比偏好模式），
-            不是对 id 本身聚类。recent 段把哈希标量当欧氏特征是一版启发式，
-            有碰撞与“假相近”代价；cat_hist 段更接近袋装比例特征。
+        设计动机 / Why (替换旧版 recent 槽位指纹):
+          - 旧版把 ``poi_id % 97`` 填进时间槽，欧氏距离会把“编号碰巧相近”当相似，
+            且强调顺序而非“去过谁/去过几次”。
+          - 新版用固定桶上的**访问计数占比**：同 POI 多重访问抬高同一桶，
+            相同访问多重集（可打乱顺序）→ 同一向量，更贴近 visit-based 相似。
+          - id 数值本身仍无语义；桶只是压缩 catalog 的哈希地址。
+          - KMeans 比较的是各 example 的 96 维袋向量，不是对 id 聚类。
+          - 未来可加「轨迹」通道（如 last-k 有序 poi/cat 槽或时间衰减），
+            与本 visit 袋并行；当前实现只做 visit-based，不做 dual-channel。
         """
         pois = ex["history_poi_ids"]
         cats = ex["history_categories"]
 
-        # ----- cat_hist：类别偏好的固定 32 桶直方图 -----
-        # 为何 % 32？
-        #   类别 id 可以很多（北京 train 词表 n_cats≈125），若按真实 id 开直方图，
-        #   维数会随词表变、且对 SURD 前的 KMeans 过碎。固定 32 维后：
-        #     桶下标 = category_id % 32
-        #   不同类别可能撞到同一桶（有意的信息压缩/哈希），换来稳定、短、可聚类的向量。
-        # 这段在做什么？统计历史里各类别出现比例（归一化后和为 1），描述长期/袋装偏好。
-        # 注意：比较的是“桶占比向量”，不是“类别 id 数值距离”。
-        cat_hist = np.zeros(32, dtype=np.float64)
+        # ----- cat_hist：全历史类别袋（归一化占比）-----
+        # 桶 = category_id % 32：固定维数；比较的是各桶访问比例，不是 id 远近。
+        cat_hist = np.zeros(Q1_CAT_BINS, dtype=np.float64)
         for c in cats:
-            cat_hist[int(c) % 32] += 1.0
+            cat_hist[int(c) % Q1_CAT_BINS] += 1.0
         if cat_hist.sum() > 0:
             cat_hist /= cat_hist.sum()
 
-        # ----- recent：最近至多 16 次访问的 POI“指纹” -----
-        # 为何 % 97 再 /97？
-        #   需要把每个 POI id 压成 [0,1) 的标量特征，而不是 498 维 one-hot。
-        #   ``poi_id % 97`` 用质数取模做轻量哈希，减少与 2 的幂对齐的结构性碰撞；
-        #   再除以 97 缩放到 [0,1)，方便与直方图一起做欧氏距离聚类。
-        # 这段在做什么？``recent[i]`` 对应历史末尾第 i 个位置上的 POI 指纹
-        #   （pois[-16:] 按时间顺序），刻画短时访问序列，而不展开全 catalog。
-        # 诚实限制：哈希后的标量邻近 ≠ POI 语义邻近；只是廉价指纹，不是相似嵌入。
-        recent = np.zeros(16, dtype=np.float64)
-        for i, p in enumerate(pois[-16:]):
-            recent[i] = (int(p) % 97) / 97.0
+        # ----- poi_bag：全前缀 POI 访问袋（hashed bag-of-POI, TF）-----
+        # 每个历史 POI 贡献 +1 到哈希桶；多重访问累加；最后除以总次数 → 占比。
+        # 乘法哈希打散连续 id，避免“相邻编号 → 相邻桶”的假结构。
+        # 与顺序无关：同一多重集访问 → 同一 poi_bag。
+        poi_bag = np.zeros(Q1_POI_BINS, dtype=np.float64)
+        for p in pois:
+            poi_bag[_poi_bucket(int(p))] += 1.0
+        if poi_bag.sum() > 0:
+            poi_bag /= poi_bag.sum()
 
-        return np.concatenate([cat_hist, recent]).astype(np.float64)
+        return np.concatenate([cat_hist, poi_bag]).astype(np.float64)
 
     def _q3_vector(self, ex: dict) -> np.ndarray:
         """Continuous Q3 summary before clustering / 聚类前的空间摘要向量 (6,)."""
