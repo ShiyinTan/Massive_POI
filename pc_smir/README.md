@@ -39,7 +39,7 @@ Prediction examples: within each trail, history = all but last check-in; target 
 
 | Source | Derived inputs |
 |--------|----------------|
-| Q1 Personal | Historical POI/category IDs, log time gaps; KMeans preference state for SURD |
+| Q1 Personal | Full-prefix visit set (POI + namespaced cats) → MinHash signature → KMeans state for SURD |
 | Q2 Temporal | Cyclical hour/DoW, weekend flag; hour×day-type bins for SURD |
 | Q3 Spatial | Normalized coords, spatial cells (train-fitted resolution), displacements; KMeans spatial state |
 | Q4 Stable user | Prefix visit count, distinct POIs, category entropy, median move, activity radius, train-only popularity affinity |
