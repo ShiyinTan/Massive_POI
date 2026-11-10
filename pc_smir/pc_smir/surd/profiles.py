@@ -1,4 +1,12 @@
-"""Per-POI SURD profile estimation, shrinkage, normalization, cross-fitting."""
+"""Per-POI SURD profile estimation, shrinkage, normalization, cross-fitting.
+
+本模块职责 / Role:
+  离线把每个候选 POI 的 SURD 分解结果压成固定长度 float 向量（``ProfileArtifacts``），
+  供训练/评估时按 poi_id 查表；**前向里不再跑** ``estimate_surd``。
+
+  Pipeline: ``prepare_artifacts`` → ``crossfit_profiles`` → ``estimate_profiles_for_rows``
+  → 每 POI 一条 ``poi_features[pid]``（atoms × 5 channels）。
+"""
 
 from __future__ import annotations
 
@@ -25,6 +33,13 @@ DEFAULT_TRIPLES = [("Q1", "Q2", "Q3"), ("Q1", "Q3", "Q4")]
 
 
 def _feature_order(pairs=None, triples=None) -> list[str]:
+    """定死 atom 名称顺序 / Freeze the ordered list of atom names.
+
+    作用: 生成与 ``_atom_vector`` 对齐的 ``feature_names``，保证 save/load、
+    模型 ``ProfileEncoder`` 输入维稳定。默认（无自定义 pairs/triples）:
+      unique_q1..unique_q4 (4) + synergy 六对 (6) + 两个三元组 (2) → 12 atoms。
+    通道名不在此返回；由 ``_channels`` 在每个 atom 后展开 5 维。
+    """
     pairs = pairs or DEFAULT_PAIRS
     triples = triples or DEFAULT_TRIPLES
     keys = [f"unique_{q.lower()}" for q in SOURCE_NAMES]
@@ -36,7 +51,49 @@ def _feature_order(pairs=None, triples=None) -> list[str]:
 
 @dataclass
 class ProfileArtifacts:
-    """Versioned SURD profile store keyed by POI id (model index)."""
+    """Versioned SURD profile store keyed by POI id (model index).
+
+    ------------------------------------------------------------------
+    什么是 atom / What is an “atom”?
+    ------------------------------------------------------------------
+      对某个候选 POI ``p``，用标签 ``Y_p = 1[target==p]`` 相对离散源 Q1–Q4
+      跑 SURD 分解后，得到一组**可辨识标量**：
+        - ``unique_qi``: 源 Qi 对预测 Y_p 的独有信息
+        - ``synergy_qiqj`` / ``synergy_qiqjqk``: 源组合的协同信息
+      每一个这样的标量叫一个 **atom**（原子）。默认 12 个 atom（见 ``_feature_order``）。
+      redundancy 只进 ``poi_raw`` 诊断，不进模型特征向量。
+
+    ------------------------------------------------------------------
+    每个 atom 的 5 个通道 / Channels per atom
+    ------------------------------------------------------------------
+      原始 atom 值先经 κ 收缩与全局先验混合，再展成 5 维（``_channels``）:
+        1. ``robust_z``  — ``(val - median) / IQR``，再 clip；跨 POI 可比的稳健 z
+        2. ``sign``      — ``sign(val)``，保留方向（信息为正/负）
+        3. ``log1p_se``  — ``log1p(bootstrap SE)``，估计不确定度（越大越不稳）
+        4. ``reliability`` — ``n_pos / (n_pos + κ)``，该 POI 正例支持度（同值广播到各 atom）
+        5. ``valid``     — 1 若 ``n_pos >= min_positive`` 且跑过估计，否则 0（同值广播）
+
+      故 ``feature_dim = len(feature_names) * 5``（北京 smoke 常 12×5=60）。
+
+    ------------------------------------------------------------------
+    怎么用 / How to use
+    ------------------------------------------------------------------
+      1) 离线: ``prepare_artifacts`` → ``crossfit_profiles`` → ``full.save(...)`` /
+         pickle folds；得到 ``surd_profiles_full.json`` 与 fold 表。
+      2) 在线查表: ``art = ProfileArtifacts.load(path)`` 或从 pickle 取 fold；
+         ``feats, valid = art.lookup(candidate_poi_ids)``
+         → ``feats`` shape ``[C, feature_dim]``，``valid`` shape ``[C]``。
+      3) 训练行用 **本折** fold profile 查 target，避免用含本行标签的 full 表；
+         val/test 候选用 **full** 表。未知 poi_id → 全零特征 + valid=0。
+
+    字段 / Fields:
+      poi_features: 模型 POI id → float32 向量（已含 5 通道展开）
+      poi_valid:    模型 POI id → 标量是否可信（与通道 valid 一致）
+      poi_raw:      诊断用原始 atoms/SE/redundancy/收缩细节
+      feature_names / channel_names: atom 名与通道名
+      norm_median / norm_iqr: 全体有支持 POI 上 atom 的中位数与 IQR
+      global_prior: 有支持 POI 上 atom 的中位数，作无支持 POI 的先验
+    """
 
     poi_features: dict[int, np.ndarray]
     poi_valid: dict[int, float]
@@ -52,10 +109,17 @@ class ProfileArtifacts:
 
     @property
     def feature_dim(self) -> int:
+        """模型输入维 = atom 数 × 5 通道 / Input dim = #atoms × 5 channels."""
         # channels per atom: robust_z, sign, log1p(se), reliability, valid
         return len(self.feature_names) * 5
 
     def lookup(self, poi_ids: list[int]) -> tuple[np.ndarray, np.ndarray]:
+        """按候选 POI id 批量取特征向量 / Batch-fetch SURD vectors for candidates.
+
+        作用: Dataset / pipeline 用；返回
+          feats: float32 ``[len(poi_ids), feature_dim]``
+          valid: float32 ``[len(poi_ids)]``（缺表或无效 POI 为 0，特征为零向量）
+        """
         feats = []
         valid = []
         for pid in poi_ids:
@@ -68,6 +132,7 @@ class ProfileArtifacts:
         return np.stack(feats, axis=0), np.asarray(valid, dtype=np.float32)
 
     def save(self, path: str | Path) -> None:
+        """序列化为 JSON（full 表常用）/ Persist profile table as JSON."""
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
         payload = {
@@ -88,6 +153,7 @@ class ProfileArtifacts:
 
     @classmethod
     def load(cls, path: str | Path) -> "ProfileArtifacts":
+        """从 JSON 恢复查表结构 / Restore a saved full (or any) profile table."""
         with open(path, "r", encoding="utf-8") as f:
             payload = json.load(f)
         return cls(
@@ -106,6 +172,11 @@ class ProfileArtifacts:
 
 
 def _atom_vector(result: dict, pairs, triples) -> np.ndarray:
+    """从 ``estimate_surd`` 结果抽出定序 atom 标量向量 / Pack ordered atom scalars.
+
+    作用: 把 unique + pair/triple synergy 按 ``_feature_order`` 排成 ``[n_atoms]``。
+    redundancy 不进入此向量（仅诊断）。
+    """
     syn = result["synergy"]
     vals = [float(result["unique"][q]) for q in SOURCE_NAMES]
     for a, b in pairs:
@@ -123,7 +194,27 @@ def _atom_vector(result: dict, pairs, triples) -> np.ndarray:
     return np.asarray(vals, dtype=np.float64)
 
 
-def _channels(atom_vals: np.ndarray, se: np.ndarray, reliability: float, valid: float, median, iqr, clip: float = 5.0) -> np.ndarray:
+def _channels(
+    atom_vals: np.ndarray,
+    se: np.ndarray,
+    reliability: float,
+    valid: float,
+    median,
+    iqr,
+    clip: float = 5.0,
+) -> np.ndarray:
+    """每个 atom 展开为 5 通道并展平 / Expand each atom into 5 channels, then flatten.
+
+    输入 atom_vals/se: ``[n_atoms]``；输出 float32 ``[n_atoms * 5]``，交错顺序为
+    ``[z0,sign0,logse0,rel0,val0, z1, ...]``，与 ``channel_names`` 一致。
+
+    通道含义（中英）:
+      robust_z   — 相对全体有支持 POI 的 median/IQR 稳健标准化，再 ±clip
+      sign       — atom 符号，保留“有/无正向信息”方向
+      log1p_se   — bootstrap 标准误的 log1p，刻画估计噪声
+      reliability— 该 POI 正例支持度 ``n_pos/(n_pos+κ)``（各 atom 相同）
+      valid      — 是否达到 ``min_positive`` 并完成估计（各 atom 相同）
+    """
     robust_z = (atom_vals - median) / np.clip(iqr, 1e-6, None)
     robust_z = np.clip(robust_z, -clip, clip)
     sign = np.sign(atom_vals)
@@ -139,6 +230,15 @@ def estimate_profiles_for_rows(
     catalog_poi_ids: list[int],
     config: dict | None = None,
 ) -> ProfileArtifacts:
+    """在给定行集合上为 catalog 每个 POI 估计一张 SURD profile 表.
+
+    作用 / Role:
+      对每个 ``p ∈ catalog``，令 ``Y_p = 1[target==p]``，调 ``estimate_surd`` 得 atoms；
+      bootstrap 得 SE；用 κ 收缩到 ``global_prior``；再 ``_channels`` 成模型向量。
+      正例不足 ``min_positive`` 的 POI：用先验填特征，``valid=0``。
+
+    被 ``crossfit_profiles``（每折子集 + full train）调用；本身不做交叉拟合。
+    """
     cfg = {
         "alpha": 0.5,
         "pairs": DEFAULT_PAIRS,
@@ -224,6 +324,7 @@ def estimate_profiles_for_rows(
         n_pos = pos_counts.get(p, 0)
         reliability = n_pos / (n_pos + kappa) if n_pos > 0 else 0.0
         if p in raw_atoms:
+            # κ-shrinkage toward global prior before channel packing.
             shrunk = reliability * raw_atoms[p] + (1.0 - reliability) * global_prior
             valid = 1.0 if n_pos >= int(cfg["min_positive"]) else 0.0
             se = ses[p]
@@ -273,8 +374,10 @@ def crossfit_profiles(
 ) -> tuple[ProfileArtifacts, list[ProfileArtifacts], np.ndarray]:
     """Forward-chaining / block cross-fit profiles for training rows.
 
-    被 ``prepare_artifacts`` 调用。对 catalog 中每个 POI p，在给定行集合上估计
-    Y_p 相对 Q1–Q4 的 SURD 原子（经 ``estimate_profiles_for_rows`` → ``estimate_surd``）。
+    作用 / Role:
+      被 ``prepare_artifacts`` 调用。对 catalog 中每个 POI p，在给定行集合上估计
+      Y_p 相对 Q1–Q4 的 SURD 原子（经 ``estimate_profiles_for_rows`` → ``estimate_surd``）。
+      训练用折外表防泄漏；val/test 用 full 表。
 
     输入 / Inputs:
       example_poi_targets: [N] 每条 train example 的 target 模型 POI id（北京 N≈400）
@@ -320,5 +423,6 @@ def crossfit_profiles(
 
 
 def source_transform_hash(discretizer_cfg: dict) -> str:
+    """离散化配置指纹 / Short hash of discretizer config for cache/provenance keys."""
     blob = json.dumps(discretizer_cfg, sort_keys=True).encode()
     return hashlib.sha256(blob).hexdigest()[:16]
