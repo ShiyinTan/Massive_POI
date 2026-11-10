@@ -1,0 +1,67 @@
+seed: 42
+
+data:
+  city: beijing
+  data_dir: data/beijing
+  download: true
+  max_len: 20
+  spatial_cell_size_m: 500
+  # null => full training catalog softmax; int => sampled softmax negatives
+  train_neg_samples: 64
+
+surd:
+  estimator: mmi_pid_discrete_v1
+  n_clusters: 6
+  hour_bins: 8
+  alpha: 0.5
+  min_positive: 2
+  kappa: 10.0
+  n_bootstrap: 3
+  n_folds: 4
+  temporal_crossfit: true
+  clip: 5.0
+  pairs:
+    - [Q1, Q2]
+    - [Q1, Q3]
+    - [Q1, Q4]
+    - [Q2, Q3]
+    - [Q2, Q4]
+    - [Q3, Q4]
+  triples:
+    - [Q1, Q2, Q3]
+    - [Q1, Q3, Q4]
+
+model:
+  d: 64
+  meta_dim: 5
+  stable_dim: 8
+  dropout: 0.1
+  use_bilinear: true
+  router_temperature: 1.0
+  ablation: full  # full | uniform | no_surd | concat_mlp
+  pairs:
+    - [0, 1]
+    - [0, 2]
+    - [0, 3]
+    - [1, 2]
+    - [2, 3]
+  triples:
+    - [0, 1, 2]
+    - [0, 2, 3]
+
+train:
+  batch_size: 8
+  eval_batch_size: 4
+  epochs: 5
+  lr: 0.001
+  weight_decay: 0.00001
+  grad_clip: 5.0
+  patience: 3
+  select_metric: recall@10
+  loss: ce
+  temperature: 1.0
+  entropy_coef: 0.0
+
+output:
+  artifact_dir: artifacts/beijing
+  run_dir: outputs/beijing

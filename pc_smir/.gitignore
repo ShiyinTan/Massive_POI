@@ -1,0 +1,23 @@
+artifacts/
+outputs/
+__pycache__/
+*.pyc
+.pytest_cache/
+.DS_Store
+**/.cache/
+
+# Other cities download on demand; Beijing demo CSVs are tracked.
+data/tokyo/
+data/shanghai/
+data/sydney/
+data/melbourne/
+data/moscow/
+data/new_york/
+data/sao_paulo/
+data/jakarta/
+data/istanbul/
+data/bandung/
+data/kuwait_city/
+data/palembang/
+data/petaling_jaya/
+data/tangerang/
