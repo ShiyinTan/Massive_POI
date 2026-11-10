@@ -15,7 +15,16 @@ from pc_smir.features.temporal import day_type, hour_bin
 
 @dataclass
 class SourceDiscretizer:
-    """Train-only KMeans / bin transforms for SURD source states."""
+    """Train-only KMeans / bin transforms for SURD source states.
+
+    作用 / Role（被 ``pipeline.prepare_artifacts`` 调用）:
+      把每条 next-POI example 的四个语义源压成**小基数离散状态**，供离线 SURD
+      估计器使用；不是模型里的 E1–E4 连续向量。
+
+    fit(train examples) → 学 Q1/Q3/Q4 的 KMeans 与 Q4 标准化；Q2 用固定时间 bin。
+    transform_example(ex) → {"Q1","Q2","Q3","Q4"} 整数状态。
+    北京 smoke: ~400 train 行，n_clusters 常 4–6。
+    """
 
     n_clusters: int = 8
     hour_bins: int = 8
@@ -27,6 +36,7 @@ class SourceDiscretizer:
     missing_state: int = -1
 
     def fit(self, examples: list[dict]) -> "SourceDiscretizer":
+        """Fit cluster/bin maps on training examples only / 仅用 train 拟合。"""
         q1 = np.stack([self._q1_vector(ex) for ex in examples], axis=0)
         q3 = np.stack([self._q3_vector(ex) for ex in examples], axis=0)
         q4 = np.stack([ex["stable_user_features"] for ex in examples], axis=0)
@@ -41,6 +51,10 @@ class SourceDiscretizer:
         return self
 
     def transform_example(self, ex: dict) -> dict[str, int]:
+        """Freeze train-fitted maps; emit one discrete state per source Q1–Q4.
+
+        输出例: {"Q1": 2, "Q2": 5, "Q3": 1, "Q4": 0} —— 供 SURD 列联表，而非 embedding。
+        """
         if self.q1_model is None:
             raise RuntimeError("SourceDiscretizer must be fit before transform")
         q1 = int(self.q1_model.predict(self._q1_vector(ex)[None, :])[0])
