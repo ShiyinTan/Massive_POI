@@ -116,6 +116,14 @@ class SourceDiscretizer:
         两段拼接: ``cat_hist[32]`` + ``recent[16]`` → 再交给 KMeans 得到 Q1 簇 id。
         目的是用固定短向量概括“常去什么类 + 最近去过哪些点”，避免对全量
         类别/POI 做 one-hot（北京类别上百、POI 近五百，列联/聚类会很稀疏）。
+
+        重要澄清 / Important:
+          - cat_id / poi_id 的数值大小**不表示语义相近**（只是词表编号）。
+          - ``% 32`` / ``% 97`` 是哈希压缩，不是度量学习 embedding；id=10 与 id=11
+            哈希后靠近，也不代表两个 POI/类别相似。
+          - KMeans 聚类的是**每条 example 的 48 维摘要向量**（跨样本比偏好模式），
+            不是对 id 本身聚类。recent 段把哈希标量当欧氏特征是一版启发式，
+            有碰撞与“假相近”代价；cat_hist 段更接近袋装比例特征。
         """
         pois = ex["history_poi_ids"]
         cats = ex["history_categories"]
@@ -127,6 +135,7 @@ class SourceDiscretizer:
         #     桶下标 = category_id % 32
         #   不同类别可能撞到同一桶（有意的信息压缩/哈希），换来稳定、短、可聚类的向量。
         # 这段在做什么？统计历史里各类别出现比例（归一化后和为 1），描述长期/袋装偏好。
+        # 注意：比较的是“桶占比向量”，不是“类别 id 数值距离”。
         cat_hist = np.zeros(32, dtype=np.float64)
         for c in cats:
             cat_hist[int(c) % 32] += 1.0
@@ -140,6 +149,7 @@ class SourceDiscretizer:
         #   再除以 97 缩放到 [0,1)，方便与直方图一起做欧氏距离聚类。
         # 这段在做什么？``recent[i]`` 对应历史末尾第 i 个位置上的 POI 指纹
         #   （pois[-16:] 按时间顺序），刻画短时访问序列，而不展开全 catalog。
+        # 诚实限制：哈希后的标量邻近 ≠ POI 语义邻近；只是廉价指纹，不是相似嵌入。
         recent = np.zeros(16, dtype=np.float64)
         for i, p in enumerate(pois[-16:]):
             recent[i] = (int(p) % 97) / 97.0
