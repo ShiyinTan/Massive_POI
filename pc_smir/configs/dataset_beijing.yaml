@@ -1,0 +1,10 @@
+data:
+  city: beijing
+  data_dir: data/beijing
+  download: true
+  max_len: 20
+  train_neg_samples: 64
+
+output:
+  artifact_dir: artifacts/beijing
+  run_dir: outputs/beijing

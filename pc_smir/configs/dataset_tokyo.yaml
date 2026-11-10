@@ -1,0 +1,10 @@
+data:
+  city: tokyo
+  data_dir: data/tokyo
+  download: true
+  max_len: 20
+  train_neg_samples: 128
+
+output:
+  artifact_dir: artifacts/tokyo
+  run_dir: outputs/tokyo
