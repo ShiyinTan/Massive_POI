@@ -7,6 +7,7 @@ from pc_smir.data.splits import load_official_splits, split_manifest
 
 def test_official_beijing_splits_disjoint():
     data_dir = Path(__file__).resolve().parents[1] / "data" / "beijing"
+    # 加载真实划分表，并检查 trail 互斥 / load data + check trail disjointness
     splits = load_official_splits("beijing", data_dir, download=True)
     trains = set(splits["train"]["trail_id"].astype(str))
     vals = set(splits["validation"]["trail_id"].astype(str))
@@ -14,6 +15,7 @@ def test_official_beijing_splits_disjoint():
     assert not (trains & vals)
     assert not (trains & tests)
     assert not (vals & tests)
+    # Manifest 只是摘要元数据，不是第二次加载 / summary only, not a second load
     man = split_manifest(splits)
     assert man["train"]["protocol"] == "massive_steps_official_trail_split"
     assert man["train"]["n_trails"] > 0
