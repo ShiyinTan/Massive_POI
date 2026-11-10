@@ -86,7 +86,11 @@ def prepare_artifacts(cfg: dict[str, Any], force: bool = False) -> dict[str, Pat
     #   Q3: 末位置/格子/位移等摘要 → KMeans 簇 id
     #   Q4: stable_user_features[8] 标准化后 → KMeans 簇 id
     # 输入: train dict examples（需临时挂回 vocab 供 spatial_cell_id）
-    # 输出: 拟合好的 disc；北京 smoke 常 n_clusters≈4–6，≈400 条 train 上 fit
+    # disc 长什么样（北京 smoke, n_clusters=4 实测）:
+    #   类型: SourceDiscretizer 对象（不是 ndarray）
+    #   disc.q1_model / q3_model / q4_model: sklearn KMeans, n_clusters_=4
+    #   disc.q4_mean / q4_std: float32, shape (8,)
+    #   disc.transform_example(ex) → dict[str,int]，例 {"Q1":1,"Q2":6,"Q3":2,"Q4":1}
     # Fit source discretizer on training examples (need vocab back for transform vectors).
     train_for_disc = []
     for ex in examples["train"]:
@@ -101,11 +105,13 @@ def prepare_artifacts(cfg: dict[str, Any], force: bool = False) -> dict[str, Pat
     def states_for(ex_list: list[dict]) -> tuple[np.ndarray, dict[str, np.ndarray], np.ndarray]:
         """Map examples → (target_poi_ids, {Q1..Q4: state_ids}, query_timestamps).
 
-        把每条 example 变成 SURD 估计用的一行：
-          - targets[i] = 该例 target 的模型 POI id
-          - mats["Q*"][i] = 该例四个源的离散状态 id（transform_example）
-          - times[i] = 预测时刻（用于时间块交叉拟合）
-        北京 train: targets/mats 长度 ≈400；每个 Q* 为小整数类别。
+        把每条 example 变成 SURD 估计用的一行。北京 smoke train 实测返回值形状:
+          targets:      np.int64, shape (400,)   值域约 [2, 498]，例 [40, 310, 494, ...]
+          mats["Q1"]:   np.int64, shape (400,)   簇 id，值域 [0, 3]（n_clusters=4）
+          mats["Q2"]:   np.int64, shape (400,)   时间状态，值域 [0, 15]，例 [6, 6, 5, 11, ...]
+          mats["Q3"]:   np.int64, shape (400,)   簇 id [0, 3]
+          mats["Q4"]:   np.int64, shape (400,)   簇 id [0, 3]
+          times:        np.float64, shape (400,) Unix 秒，例 1.3577e9 ...
         """
         targets = []
         mats = {"Q1": [], "Q2": [], "Q3": [], "Q4": []}
@@ -125,20 +131,25 @@ def prepare_artifacts(cfg: dict[str, Any], force: bool = False) -> dict[str, Pat
         )
 
     # 仅用 train 行估计 SURD（val/test 目标不得参与）。
+    # 赋值后（北京 smoke）:
+    #   train_targets: (400,) int64
+    #   train_states:  dict 4 键 → 各 (400,) int64
+    #   train_times:   (400,) float64
+    #   catalog:       list[int] 长度 498，头几个常为 [2,3,4,5,6]（跳过 pad/oov）
     train_targets, train_states, train_times = states_for(examples["train"])
     catalog = sorted({p for p in vocab.id2poi if p >= 2})
 
     # ----- Offline SURD profiles（前向里不再跑估计器）-----
     # crossfit_profiles（surd/profiles.py）内部对每个 POI 调 estimate_surd
     # （surd/estimator.py, mmi_pid_discrete_v1）：
-    #   输入: Y_p=1[target==p]，以及全体 train 行的 Q1–Q4 状态
+    #   输入: Y_p=1[target==p] 与 train_states；N=400 行, |catalog|=498
     #   输出原子: unique(Q_i)、pair/triple synergy、redundancy（冗余仅诊断）
-    #   再做 bootstrap SE、κ 收缩、robust 归一化 → 每 POI 一条特征向量
-    # 返回:
-    #   full  — 用全部 train 估的表，供 val/test 候选查找
-    #   folds — 每折只用其它/更早数据估的表，供训练防泄漏
-    #   fold_id[i] — 第 i 条 train example 所属时间块
-    # 北京: catalog≈498；smoke 常 n_folds=3、n_bootstrap=2（较慢步，故离线一次）
+    #   再做 bootstrap SE、κ 收缩、robust 归一化 → 每 POI 一条 float32 特征向量
+    # 返回值长什么样（北京 smoke）:
+    #   full:     ProfileArtifacts；full.poi_features[pid] → float32 向量，长度=surd_dim
+    #             （atoms×5 通道；smoke 配置下通常几十维）
+    #   folds:    list[ProfileArtifacts]，len=n_folds（smoke 常 3）
+    #   fold_id:  np.int64, shape (400,)，每条 train example 的时间块编号 ∈ {0..n_folds-1}
     surd_cfg = dict(cfg.get("surd", {}))
     full, folds, fold_id = crossfit_profiles(
         train_targets,
@@ -154,9 +165,9 @@ def prepare_artifacts(cfg: dict[str, Any], force: bool = False) -> dict[str, Pat
     with open(paths["discretizer"], "wb") as f:
         pickle.dump(disc, f)
 
-    # 给每条 train example 挂上「其所在 fold 估出的」target POI 的 SURD 元数据（fold_id）。
-    # 真正喂模型的候选 SURD 向量在 Dataset 里按 candidate_poi_ids 查表填充
-    # （train 用折平均/折表，val·test 用 full）；这里不把全候选表打进每条 example。
+    # 给每条 train example 挂 fold_id；lookup 得到该 fold 下 target 的 SURD 向量。
+    # 北京 smoke: feats[0] 为 float32, shape (surd_dim,)；valid 为标量 float。
+    # 候选 SURD 在 Dataset 按 candidate_poi_ids 查表，不在这里展开成 [N,C,F]。
     train_surd_feats = []
     train_surd_valid = []
     for i, ex in enumerate(examples["train"]):

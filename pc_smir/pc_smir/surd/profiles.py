@@ -285,7 +285,9 @@ def crossfit_profiles(
     返回 / Returns:
       - full_train_profiles: 用全部 train 估的表 → val/test 候选查找
       - fold_profiles: 长度 n_folds；第 k 折不含（或不晚于）折 k 的标签
-      - fold_id per example: 训练时选用哪张折表
+      - fold_id: np.int64, shape (N,)（北京 smoke N=400），取值 0..n_folds-1
+
+    北京 smoke 输入形状提醒: targets/Q* 均为 (400,) int64；catalog list 长 498。
     """
     n = len(example_poi_targets)
     if timestamps is not None:
