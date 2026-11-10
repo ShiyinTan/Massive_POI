@@ -48,6 +48,8 @@ def prepare_artifacts(cfg: dict[str, Any], force: bool = False) -> dict[str, Pat
     vocab = fit_vocab(splits["train"], spatial_cell_size_m=float(cfg["data"].get("spatial_cell_size_m", 500)))
     vocab.save(paths["vocab"])
 
+    # prepare 阶段：CSV trails → Python dict examples（北京 train≈400 条），稍后 pickle。
+    # NextPOIDataset / collate 在 train·eval 才用，这里不转 tensor。
     examples = {
         "train": build_examples(splits["train"], vocab, max_len),
         "validation": build_examples(splits["validation"], vocab, max_len),
@@ -184,6 +186,8 @@ def build_dataloaders(cfg: dict[str, Any], paths: dict[str, Path]):
     neg = cfg["data"].get("train_neg_samples", None)
     bs = int(cfg["train"].get("batch_size", 16))
 
+    # train/eval：把 examples 变成张量 Dataset。
+    # 训练可 sampled softmax（neg_samples）；val/test 全量 catalog（北京 C≈498）。
     train_ds = NextPOIDataset(
         examples["train"],
         vocab,
@@ -218,6 +222,7 @@ def build_dataloaders(cfg: dict[str, Any], paths: dict[str, Path]):
         seed=0,
     )
 
+    # collate_variable_candidates：pad 候选维到 batch 内 max C，并加 candidate_mask。
     train_loader = DataLoader(
         train_ds,
         batch_size=bs,
