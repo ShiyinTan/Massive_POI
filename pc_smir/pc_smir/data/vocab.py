@@ -210,7 +210,7 @@ def spatial_cell_id(lat: float, lon: float, vocab: VocabMaps) -> int:
       首条 train 坐标 (39.98295, 116.49279) → spatial_cell_id ≈ 5700224
       纬度 +0.0045°（约 +500m）→ 格子变为 ≈ 5800227
 
-    Pipeline: build_prefix_example / SURD Q3 状态构造时调用。
+    Pipeline: ``dataset.build_prefix_example`` 与 SURD Q3（``SourceDiscretizer``）调用。
     """
     # Approximate meters: 1 deg lat ~ 111_320 m; lon scaled by cos(lat).
     meters_per_deg_lat = 111_320.0

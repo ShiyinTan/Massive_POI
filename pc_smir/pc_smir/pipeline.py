@@ -14,7 +14,7 @@ from torch.utils.data import DataLoader
 from pc_smir.data.dataset import NextPOIDataset, build_examples, collate_variable_candidates
 from pc_smir.data.splits import load_official_splits, split_manifest
 from pc_smir.data.vocab import VocabMaps, fit_vocab
-from pc_smir.features.sources import SourceDiscretizer
+from pc_smir.features.sources import SourceDiscretizer  # SURD 离散源；example 构造在 dataset
 from pc_smir.models.pcsmir import PCSMIR
 from pc_smir.surd.profiles import ProfileArtifacts, crossfit_profiles
 

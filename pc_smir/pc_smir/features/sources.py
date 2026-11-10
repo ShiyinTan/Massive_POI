@@ -1,4 +1,10 @@
-"""Source-state construction for SURD estimation (discrete, train-fitted)."""
+"""Q1–Q4 source discretization for offline SURD estimation.
+
+职责边界 / Ownership:
+  - 本模块只负责「信息源 → 离散状态」：``SourceDiscretizer``。
+  - next-POI **example 构造**（trail 前缀 → dict）在 ``pc_smir.data.dataset``，
+    不放这里，避免 dataset 与 SURD 源离散化搅在一起。
+"""
 
 from __future__ import annotations
 
@@ -9,7 +15,6 @@ import numpy as np
 from sklearn.cluster import KMeans
 
 from pc_smir.data.vocab import VocabMaps, haversine_m, spatial_cell_id
-from pc_smir.features.stable_user import stable_user_features
 from pc_smir.features.temporal import day_type, hour_bin
 
 
@@ -19,9 +24,45 @@ class SourceDiscretizer:
 
     作用 / Role（被 ``pipeline.prepare_artifacts`` 调用）:
       把每条 next-POI example 的四个语义源压成**小基数离散状态**，供离线 SURD
-      估计器使用；不是模型里的 E1–E4 连续向量。
+      估计器使用；**不是**模型里 E1–E4 的连续向量。
 
-    fit(train examples) → 学 Q1/Q3/Q4 的 KMeans 与 Q4 标准化；Q2 用固定时间 bin。
+    ------------------------------------------------------------------
+    四个源分别是什么、怎么得到、为何这样设计
+    ------------------------------------------------------------------
+
+    **Q1 个人偏好 (Personal preference)**
+      - 长什么样: 先得到连续摘要向量 ``_q1_vector`` ∈ R^{48}
+        （32 维类别直方图 + 16 维近期 POI hash），再 KMeans → 整数簇 id。
+      - 怎么得到: 只用 example 的 ``history_poi_ids`` / ``history_categories``
+        （来自 dataset 的前缀，不含 target）。
+      - 为何: SURD 需要低基数类别；直接用 embedding 会随训练漂移且维数过高。
+        簇 id 把“相似偏好画像”归并，便于估 unique/synergy。
+
+    **Q2 时间上下文 (Temporal)**
+      - 长什么样: 单个整数 ``hour_bin * 2 + day_type``。
+        ``hour_bin`` ∈ [0, hour_bins)（默认 8 段，每段约 3 小时）；
+        ``day_type`` ∈ {0=工作日, 1=周末} → 合计最多 ``hour_bins*2`` 个状态
+        （默认 16；北京 smoke 实测值域约 [0,15]）。
+      - 怎么得到: 读 ``ex["query_time"]``（最后一次**历史**签到时间，不是 target）。
+      - 为何: 时间本身已是低基数；无需 KMeans。保留 hour×周末 交互，
+        对应“何时出门”这一源，与偏好/空间语义分开。
+
+    **Q3 空间上下文 (Spatial)**
+      - 长什么样: 连续摘要 ``_q3_vector`` ∈ R^{6}
+        （末点 lat/lon、格子哈希、中位位移、历史长度、独特位置数），
+        再 KMeans → 整数簇 id。
+      - 怎么得到: ``history_coordinates`` + train 拟合的 ``spatial_cell_id``
+        （需要 ``ex["vocab"]``）；**不用 target 坐标当当前位置**。
+      - 为何: 原始经纬度几乎唯一，列联表会稀疏；聚类成区域/移动模式状态。
+
+    **Q4 稳定用户画像 (Stable user)**
+      - 长什么样: 直接用 example 里已算好的 ``stable_user_features`` ∈ R^{8}
+        （访问量、多样性、熵、位移、半径等，见 ``features/stable_user.py``），
+        用 train 的 mean/std 标准化后再 KMeans → 整数簇 id。
+      - 怎么得到: dataset 在建 example 时写入该 8 维向量；本类只做标准化+聚类。
+      - 为何: 与短时序列偏好（Q1）分开，表示更慢变的用户活跃/流动性档位。
+
+    fit(train examples) → 学 Q1/Q3/Q4 的 KMeans 与 Q4 标准化；Q2 无固定规则。
     transform_example(ex) → {"Q1","Q2","Q3","Q4"} 整数状态。
 
     北京 smoke（n_clusters=4）对象字段示例:
@@ -62,6 +103,7 @@ class SourceDiscretizer:
         if self.q1_model is None:
             raise RuntimeError("SourceDiscretizer must be fit before transform")
         q1 = int(self.q1_model.predict(self._q1_vector(ex)[None, :])[0])
+        # Q2: deterministic hour×day-type code (no cluster model).
         q2 = hour_bin(ex["query_time"], self.hour_bins) * 2 + day_type(ex["query_time"])
         q3 = int(self.q3_model.predict(self._q3_vector(ex)[None, :])[0])
         q4v = (ex["stable_user_features"] - self.q4_mean) / self.q4_std
@@ -69,6 +111,7 @@ class SourceDiscretizer:
         return {"Q1": q1, "Q2": int(q2), "Q3": q3, "Q4": q4}
 
     def _q1_vector(self, ex: dict) -> np.ndarray:
+        """Continuous Q1 summary before clustering / 聚类前的偏好摘要向量 (48,)."""
         pois = ex["history_poi_ids"]
         cats = ex["history_categories"]
         # Preference summary: normalized category histogram + recency-weighted POI hash features.
@@ -83,6 +126,7 @@ class SourceDiscretizer:
         return np.concatenate([cat_hist, recent]).astype(np.float64)
 
     def _q3_vector(self, ex: dict) -> np.ndarray:
+        """Continuous Q3 summary before clustering / 聚类前的空间摘要向量 (6,)."""
         coords = ex["history_coordinates"]
         if not coords:
             return np.zeros(6, dtype=np.float64)
@@ -103,50 +147,3 @@ class SourceDiscretizer:
             ],
             dtype=np.float64,
         )
-
-
-def build_prefix_example(
-    user_id: int,
-    trail_id: str,
-    hist_rows: list[dict],
-    target_venue_id: int,
-    vocab: VocabMaps,
-    max_len: int,
-) -> dict | None:
-    """Build one next-POI example from trail prefix (excludes target event)."""
-    if len(hist_rows) < 1:
-        return None
-    hist_rows = hist_rows[-max_len:]
-    poi_ids = [vocab.encode_poi(r["venue_id"]) for r in hist_rows]
-    cat_ids = [vocab.encode_cat(r["venue_category"]) for r in hist_rows]
-    coords = [(float(r["latitude"]), float(r["longitude"])) for r in hist_rows]
-    times = [r["timestamp"] for r in hist_rows]
-    # Prediction timestamp = last observed check-in (not target timestamp).
-    query_time = times[-1]
-    time_gaps = [0.0]
-    for i in range(1, len(times)):
-        gap = max(0.0, (times[i] - times[i - 1]).total_seconds() / 3600.0)
-        time_gaps.append(float(np.log1p(gap)))
-
-    cells = [spatial_cell_id(a, b, vocab) for a, b in coords]
-    stable = stable_user_features(poi_ids, cat_ids, coords, vocab)
-    target_id = vocab.encode_poi(target_venue_id)
-    return {
-        "user_id": int(user_id),
-        "trail_id": str(trail_id),
-        "history_poi_ids": poi_ids,
-        "history_categories": cat_ids,
-        "history_coordinates": coords,
-        "history_cells": cells,
-        "history_time_gaps": time_gaps,
-        "history_hours": [int(t.hour) for t in times],
-        "history_dows": [int(t.dayofweek) for t in times],
-        "query_time": query_time,
-        "stable_user_features": stable,
-        "target_poi_id": int(target_id),
-        "target_venue_raw": int(target_venue_id),
-        "last_lat": coords[-1][0],
-        "last_lon": coords[-1][1],
-        "vocab": vocab,
-        "source_available": np.ones(4, dtype=np.float32),
-    }

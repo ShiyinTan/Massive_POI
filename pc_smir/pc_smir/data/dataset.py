@@ -2,6 +2,12 @@
 
 从官方 trail 划分构造无泄漏的 next-POI 样本。
 
+职责边界 / Ownership:
+  - 本模块拥有 example 生命周期：trail → ``build_prefix_example`` →
+    ``build_examples`` → ``NextPOIDataset`` / collate。
+  - Q1–Q4 **离散化**（SURD 用）在 ``pc_smir.features.sources.SourceDiscretizer``，
+    不混在本文件。
+
 Pipeline timing / 调用时机:
   prepare  (prepare_artifacts):
       trails_from_split → build_examples  → 序列化到 examples.pkl
@@ -22,8 +28,8 @@ import pandas as pd
 import torch
 from torch.utils.data import Dataset
 
-from pc_smir.data.vocab import VocabMaps, haversine_m
-from pc_smir.features.sources import build_prefix_example
+from pc_smir.data.vocab import VocabMaps, haversine_m, spatial_cell_id
+from pc_smir.features.stable_user import stable_user_features
 from pc_smir.features.temporal import query_time_features
 
 
@@ -48,6 +54,60 @@ def trails_from_split(df: pd.DataFrame) -> list[dict[str, Any]]:
             continue
         trails.append({"user_id": int(user_id), "trail_id": str(trail_id), "rows": rows})
     return trails
+
+
+def build_prefix_example(
+    user_id: int,
+    trail_id: str,
+    hist_rows: list[dict],
+    target_venue_id: int,
+    vocab: VocabMaps,
+    max_len: int,
+) -> dict | None:
+    """Build one next-POI example from trail prefix (excludes target event).
+
+    归属 / Belongs here (dataset): 把原始签到行编成训练用的 Python dict example。
+    会写入 ``stable_user_features`` 等连续特征；SURD 离散状态由 sources 模块稍后做。
+
+    预测时刻 = 历史最后一次签到时间（不用 target 时间戳）。
+    """
+    if len(hist_rows) < 1:
+        return None
+    hist_rows = hist_rows[-max_len:]
+    poi_ids = [vocab.encode_poi(r["venue_id"]) for r in hist_rows]
+    cat_ids = [vocab.encode_cat(r["venue_category"]) for r in hist_rows]
+    coords = [(float(r["latitude"]), float(r["longitude"])) for r in hist_rows]
+    times = [r["timestamp"] for r in hist_rows]
+    # Prediction timestamp = last observed check-in (not target timestamp).
+    query_time = times[-1]
+    time_gaps = [0.0]
+    for i in range(1, len(times)):
+        gap = max(0.0, (times[i] - times[i - 1]).total_seconds() / 3600.0)
+        time_gaps.append(float(np.log1p(gap)))
+
+    cells = [spatial_cell_id(a, b, vocab) for a, b in coords]
+    stable = stable_user_features(poi_ids, cat_ids, coords, vocab)
+    target_id = vocab.encode_poi(target_venue_id)
+    return {
+        "user_id": int(user_id),
+        "trail_id": str(trail_id),
+        "history_poi_ids": poi_ids,
+        "history_categories": cat_ids,
+        "history_coordinates": coords,
+        "history_cells": cells,
+        "history_time_gaps": time_gaps,
+        "history_hours": [int(t.hour) for t in times],
+        "history_dows": [int(t.dayofweek) for t in times],
+        "query_time": query_time,
+        "stable_user_features": stable,
+        "target_poi_id": int(target_id),
+        "target_venue_raw": int(target_venue_id),
+        "last_lat": coords[-1][0],
+        "last_lon": coords[-1][1],
+        "vocab": vocab,
+        # Q1–Q4 availability mask; Beijing trails with history → typically all ones.
+        "source_available": np.ones(4, dtype=np.float32),
+    }
 
 
 def build_examples(df: pd.DataFrame, vocab: VocabMaps, max_len: int) -> list[dict]:
