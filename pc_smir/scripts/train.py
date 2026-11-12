@@ -21,7 +21,7 @@ sys.path.insert(0, str(ROOT))
 
 from pc_smir.pipeline import build_dataloaders, build_model, prepare_artifacts
 from pc_smir.training.trainer import Trainer
-from pc_smir.utils.config import load_config, save_config
+from pc_smir.utils.config import load_config, print_config, save_config
 from pc_smir.utils.seed import set_seed
 
 
@@ -44,6 +44,7 @@ def main():
     args = parser.parse_args()
 
     cfg = _resolve(load_config([ROOT / p if not Path(p).is_absolute() else Path(p) for p in args.config]))
+    print_config(cfg, title="Resolved train config")
     set_seed(int(cfg.get("seed", 0)))
 
     # Same prepare_artifacts as prepare_data.py: ensure offline artifacts exist (cached if present).

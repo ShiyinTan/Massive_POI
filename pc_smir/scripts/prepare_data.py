@@ -20,7 +20,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from pc_smir.pipeline import prepare_artifacts
-from pc_smir.utils.config import load_config, save_config
+from pc_smir.utils.config import load_config, print_config, save_config
 from pc_smir.utils.seed import set_seed
 
 
@@ -42,6 +42,7 @@ def main():
         if not p.is_absolute():
             cfg["output"][key] = str(ROOT / p)
 
+    print_config(cfg, title="Resolved prepare config")
     set_seed(int(cfg.get("seed", 0)))
     # Standalone prep entry: build or refresh offline artifacts only (no training).
     # 独立准备入口：只构建/刷新离线产物，不训练。
