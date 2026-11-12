@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -31,3 +32,12 @@ def save_config(cfg: dict[str, Any], path: str | Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:
         yaml.safe_dump(cfg, f, sort_keys=False)
+
+
+def print_config(cfg: dict[str, Any], *, title: str = "Resolved config") -> None:
+    """Pretty-print the fully merged/resolved config to stdout (YAML)."""
+    dump = yaml.safe_dump(cfg, sort_keys=False, default_flow_style=False, allow_unicode=True)
+    print(f"===== {title} =====")
+    print(dump.rstrip())
+    print(f"===== end {title} =====")
+    sys.stdout.flush()

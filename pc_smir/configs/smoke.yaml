@@ -18,6 +18,7 @@ model:
 train:
   batch_size: 4
   eval_batch_size: 4
+  # Intentionally short for CI / local sanity (full train: base + model_pcsmir → 80 / 15).
   epochs: 1
   patience: 1
   lr: 0.002

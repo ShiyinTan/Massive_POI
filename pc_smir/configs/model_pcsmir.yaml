@@ -4,6 +4,8 @@ model:
   use_bilinear: true
 
 train:
-  epochs: 8
+  # Overrides base when stacked: base + dataset_* + model_pcsmir.
+  epochs: 80
+  patience: 15
   batch_size: 8
   lr: 0.001

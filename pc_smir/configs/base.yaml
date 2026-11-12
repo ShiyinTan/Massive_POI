@@ -52,11 +52,13 @@ model:
 train:
   batch_size: 8
   eval_batch_size: 4
-  epochs: 5
+  # Full Beijing/Tokyo runs: allow enough epochs; early-stop via patience.
+  epochs: 80
   lr: 0.001
   weight_decay: 0.00001
   grad_clip: 5.0
-  patience: 3
+  # Stop after this many non-improving val epochs (trainer.fit).
+  patience: 15
   select_metric: recall@10
   loss: ce
   temperature: 1.0
