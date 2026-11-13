@@ -88,16 +88,45 @@ Per-sample dumps: `sthgcn-bias/{city}_per_sample_bias.csv`.
 
 ---
 
-## 4. Interpretation
+## 4. Test-time context：不是「只用 train」
+
+对照 Massive-STEPS STHGCN 适配器（`preprocess_std` → `sample.csv` → `generate_hypergraph_from_file` → `NeighborSampler`）：
+
+1. **测试样本过滤（相对完整 official test）**  
+   - `ignore_first`：每条 trail 的**首个** check-in 标为 `ignore`（无历史）。  
+   - `only_keep_last`：val/test 只保留 trail **最后一个** check-in 作为评测样本。  
+   - `remove_unseen_user_poi`：若该样本的 **User 或 目标 POI 未出现在 train SplitTag 样本中**，则从 val/test 丢弃。  
+   - 结果：评测集更「暖」（北京 HF test trails ~115 → STHGCN n_test **75**）。UserMostPop 若在**完整** official test 上算会更吃亏。
+
+2. **图 / 特征：train+val+test 全量建图（非 train-only）**  
+   - `preprocess_std` 把 official `*_train/validation/test.csv` **concat** 成一张表；写出的 `sample.csv` = 全量 check-in（含被标 `ignore` 的中间点）。  
+   - **LabelEncode** 的 user/POI/category/hour/weekday：**只在 train 上 fit**；未见 ID → padding。Embedding 表尺寸与监督损失来自 train 样本。  
+   - **超图 ci2traj / traj2traj** 由 `sample.csv` 生成 → **包含 val 与 test 的 trail 与 check-in**，不是 train-only，也不是严格「预测时刻之前的因果切窗建图」。  
+   - traj2traj 边带时间序约束 `source.end ≤ target.start`；采样时再对 query trail 的 ci2traj 做 `edge_t ≤ max_time`，并对 traj2traj 做 `filter_traj2traj_with_leakage`（按当前可见 check-in 重算 Jaccard）。**目标 check-in 本身**因时间掩码不可见；但**更早的 val/其他 test trail** 只要结束时间早于 query，仍可作邻居。
+
+3. **当前 trail 前缀可见，且前缀事件属于 test 划分**  
+   - 测试样本的 query = `query_pseudo_session_trajectory_id`（同 trail 的 shift）→ 查询的是**当前 test trail** 这条超边。  
+   - `max_time = last_checkin_epoch_time`（目标前一笔的时间）→ 仅保留 `t ≤ max_time` 的 check-in → **目标之前的 trail 前缀**，不含目标 label。  
+   - Massive-STEPS 按 **trail** 划分 train/val/test，故该前缀 check-in **属于 official test 文件**，不是 train。UserMostPop **不会**吃到这些 test 前缀（只统计 train 频率）；Markov1 会用到前一站（与前缀末站对齐）。
+
+4. **为何 Acc 显得「强」、相对 UserMostPop 被抬高**  
+   - **评测过滤**去掉冷用户/未见目标 POI → 与「全量 official test 上的 UMP」不可直接比；即便对齐到 STHGCN test，北京仍 **STHGCN Acc@1 = UMP = 0.453**。  
+   - **图协作**：邻居可含 train **以及** 时间上更早的 val/其他 test trail（全量建图 + 时间序边），UMP 无此信号。  
+   - **Test trail 前缀**作为序列上下文进入超图消息传递；UMP 无当前 trail 上下文。短 trail 上这往往强化「重复/转移热门」行为，与已测到的高 UMP/Markov1 top-1 重合一致。  
+   - **结论：** 测试时 **不是**「只用 official train」。监督标签与 ID 词表来自 train；**图与当前 trail 前缀上下文来自全量 sample（含 val/test 事件）**，再加时间掩码避免直接看见目标点。
+
+---
+
+## 5. Interpretation
 
 1. **Reproduction holds on CPU.** Four-city Acc@1 tracks the Massive-STEPS paper table; Beijing/Melbourne essentially exact.
 2. **Popularity / loyalty bias is large.** One-third to one-half of STHGCN top-1s are identical to UserMostPop; conditional Acc shows the model is strong mainly when the target *is* UMP or Markov1.
 3. **Reported STHGCN gains vs classical neural baselines do not imply gains vs UserMostPop.** On Beijing, STHGCN ≡ UMP Acc@1 on the filtered test; on other cities the absolute lift is only 2.5–4.5pp.
-4. **Eval protocol caveat.** STHGCN drops unseen users/POIs and keeps only the last check-in per trail → n_test is smaller than the full official test trail count used for some simple baselines in earlier Massive_POI reports. Bias numbers above are aligned to the **STHGCN test**, not the full HF test CSV.
+4. **Eval + graph protocol inflate the headline.** Unseen user/POI drop + last-only test + **full-split hypergraph** + **test-trail prefix context** make Acc look stronger than a pure train-fit / no-test-context baseline (UMP). Bias numbers above are on the **STHGCN-filtered** test.
 
 ---
 
-## 5. More bias probes (designed, not all run here)
+## 6. More bias probes (designed, not all run here)
 
 Priority probes for follow-up (same official split + dump of STHGCN top-k):
 
@@ -116,7 +145,7 @@ Suggested next run order: (1)+(2)+(3) on the existing `test_preds.pt` dumps (no 
 
 ---
 
-## 6. Repro commands
+## 7. Repro commands
 
 ```bash
 # data
