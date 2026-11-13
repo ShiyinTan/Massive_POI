@@ -108,3 +108,7 @@ Named estimator: **`mmi_pid_discrete_v1`** (MMI-style discrete PID with Dirichle
 - Default training uses **sampled softmax** (`train_neg_samples`) for speed; validation/test
   score the full training catalog.
 - OOV / unseen test POIs map to an OOV id and are excluded from ranking targets by default.
+- Optional **STHGCN-aligned eval**: set `eval.sthgcn_protocol: true` in YAML (see `configs/base.yaml`).
+  Then val/test apply `remove_unseen_user_poi` (drop if user or target POI never in train),
+  map history-prefix OOV POIs to a single UNK id, and build history from all of the user's
+  check-ins before the target timestamp (cross-trail temporal visibility).

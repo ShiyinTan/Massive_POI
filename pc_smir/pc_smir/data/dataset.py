@@ -110,19 +110,81 @@ def build_prefix_example(
     }
 
 
-def build_examples(df: pd.DataFrame, vocab: VocabMaps, max_len: int) -> list[dict]:
+def train_seen_user_poi_sets(train_df: pd.DataFrame) -> tuple[set[int], set[str]]:
+    """Raw user_id / venue_id sets observed in the training split.
+
+    Used by STHGCN-aligned ``remove_unseen_user_poi`` filtering on val/test.
+    """
+    users = {int(u) for u in train_df["user_id"].tolist()}
+    pois = {str(v) for v in train_df["venue_id"].tolist()}
+    return users, pois
+
+
+def history_rows_before_target(
+    all_df: pd.DataFrame,
+    user_id: int,
+    trail_id: str,
+    target_ts: Any,
+    target_venue_id: int,
+    max_len: int,
+) -> list[dict]:
+    """All of a user's check-ins strictly before the target event (cross-trail).
+
+    Aligns with STHGCN temporal visibility: anything with time before the target
+    label may appear in context; the target row itself is never included.
+    Truncates to the last ``max_len`` events.
+    """
+    udf = all_df.loc[all_df["user_id"].astype(int) == int(user_id)].sort_values(
+        ["timestamp", "venue_id", "trail_id"]
+    )
+    rows = udf.to_dict("records")
+    target_idx = None
+    trail_key = str(trail_id)
+    for i, r in enumerate(rows):
+        if (
+            str(r["trail_id"]) == trail_key
+            and r["timestamp"] == target_ts
+            and int(r["venue_id"]) == int(target_venue_id)
+        ):
+            target_idx = i
+    if target_idx is None or target_idx < 1:
+        return []
+    hist = rows[:target_idx]
+    if len(hist) > max_len:
+        hist = hist[-max_len:]
+    return hist
+
+
+def build_examples(
+    df: pd.DataFrame,
+    vocab: VocabMaps,
+    max_len: int,
+    *,
+    sthgcn_protocol: bool = False,
+    all_df: pd.DataFrame | None = None,
+    train_user_ids: set[int] | None = None,
+    train_venue_ids: set[str] | None = None,
+) -> list[dict]:
     """Turn each trail into one next-POI dict example (Python, not tensors yet).
 
     作用 / Role:
       history = trail 除最后一次外的签到；target = 最后一次 venue_id。
       经 ``build_prefix_example`` 生成泄漏安全特征（预测时刻=历史最后一次时间）。
 
+    When ``sthgcn_protocol=True`` (eval/val/test path):
+      - ``remove_unseen_user_poi``: drop sample if user ∉ train or target POI ∉ train.
+      - History OOV POIs map to the single UNK/OOV embedding id via ``encode_poi``
+        (sample is **not** dropped solely for history OOV).
+      - If ``all_df`` is provided, history = all of the user's check-ins before the
+        target event (cross-trail temporal visibility), not only same-trail prefix.
+
     输出样例字段（北京某 trail，hist_len=5；仍是 Python list/ndarray）:
       history_poi_ids / categories / hours / dows / time_gaps / cells / coordinates
       query_time, stable_user_features[8], source_available[4]=1,
       target_poi_id (模型 int), trail_id, user_id, last_lat/lon, ...
 
-    北京规模: train≈400, validation≈58, test≈115 examples（max_len=20）。
+    北京规模: train≈400, validation≈58, test≈115 examples（max_len=20）；
+    STHGCN protocol test after remove_unseen ≈88.
 
     何时调用: prepare_artifacts 对 train/val/test 各调用一次并写入 examples.pkl。
     train/eval 不再重建，只反序列化。
@@ -130,10 +192,31 @@ def build_examples(df: pd.DataFrame, vocab: VocabMaps, max_len: int) -> list[dic
     examples = []
     for trail in trails_from_split(df):
         rows = trail["rows"]
-        hist = rows[:-1]
-        target = rows[-1]["venue_id"]
+        target_row = rows[-1]
+        target = target_row["venue_id"]
+        user_id = int(trail["user_id"])
+
+        if sthgcn_protocol:
+            if train_user_ids is not None and user_id not in train_user_ids:
+                continue
+            if train_venue_ids is not None and str(target) not in train_venue_ids:
+                continue
+            if all_df is not None:
+                hist = history_rows_before_target(
+                    all_df,
+                    user_id=user_id,
+                    trail_id=str(trail["trail_id"]),
+                    target_ts=target_row["timestamp"],
+                    target_venue_id=int(target),
+                    max_len=max_len,
+                )
+            else:
+                hist = rows[:-1]
+        else:
+            hist = rows[:-1]
+
         ex = build_prefix_example(
-            user_id=trail["user_id"],
+            user_id=user_id,
             trail_id=trail["trail_id"],
             hist_rows=hist,
             target_venue_id=int(target),
@@ -189,6 +272,8 @@ class NextPOIDataset(Dataset):
         seed: int = 0,
         exclude_oov_targets: bool = True,
     ):
+        # exclude_oov_targets: drop samples whose *target* maps to UNK/OOV (id=1) or
+        # is outside the train catalog. History OOV stays as UNK and does not drop.
         self.vocab = vocab
         self.max_len = max_len
         self.catalog = [p for p in catalog_poi_ids if p != 0]
