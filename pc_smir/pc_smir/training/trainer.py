@@ -8,7 +8,7 @@ import torch
 from torch.utils.data import DataLoader
 from tqdm.auto import tqdm
 
-from pc_smir.evaluation.metrics import merge_metric_dicts, rank_metrics_from_scores
+from pc_smir.evaluation.metrics import format_metrics_table, merge_metric_dicts, rank_metrics_from_scores
 from pc_smir.losses.ranking import bpr_loss, full_softmax_ce, routing_entropy
 
 
@@ -63,13 +63,13 @@ class Trainer:
         return {"loss": total / max(n, 1)}
 
     @torch.no_grad()
-    def evaluate(self, loader: DataLoader, ks=(1, 5, 10, 20)) -> dict[str, float]:
+    def evaluate(self, loader: DataLoader, ks=(1, 5, 10, 20), desc: str = "eval") -> dict[str, float]:
         self.model.eval()
         parts = []
         total_loss = 0.0
         n = 0
         route_ent = 0.0
-        for batch in tqdm(loader, desc="eval", leave=False):
+        for batch in tqdm(loader, desc=desc, leave=False):
             batch = self._move(batch)
             scores, routes = self.model.score(batch)
             loss = full_softmax_ce(scores, batch["target_index"])
@@ -84,28 +84,53 @@ class Trainer:
         metrics["route_entropy"] = route_ent / max(n, 1)
         return metrics
 
-    def fit(self, train_loader, val_loader, epochs: int, select_metric: str = "recall@10"):
+    def fit(
+        self,
+        train_loader,
+        val_loader,
+        epochs: int,
+        select_metric: str = "recall@10",
+        test_loader=None,
+    ):
         patience = int(self.cfg.get("patience", 5))
         bad = 0
         for epoch in range(1, epochs + 1):
             tr = self.train_epoch(train_loader)
-            va = self.evaluate(val_loader)
-            row = {"epoch": epoch, **{f"train_{k}": v for k, v in tr.items()}, **{f"val_{k}": v for k, v in va.items()}}
+            va = self.evaluate(val_loader, desc="val")
+            te = self.evaluate(test_loader, desc="test") if test_loader is not None else None
+            row = {
+                "epoch": epoch,
+                **{f"train_{k}": v for k, v in tr.items()},
+                **{f"val_{k}": v for k, v in va.items()},
+            }
+            if te is not None:
+                row.update({f"test_{k}": v for k, v in te.items()})
             self.history.append(row)
-            print(json.dumps({k: (round(v, 4) if isinstance(v, float) else v) for k, v in row.items()}))
+
+            splits = {"val": va}
+            if te is not None:
+                splits["test"] = te
+            print(
+                format_metrics_table(
+                    splits,
+                    epoch=epoch,
+                    train_loss=float(tr.get("loss", 0.0)),
+                )
+            )
+
             score = float(va.get(select_metric, 0.0))
             if score > self.best_metric:
                 self.best_metric = score
                 bad = 0
-                torch.save(
-                    {
-                        "model": self.model.state_dict(),
-                        "cfg": self.cfg,
-                        "epoch": epoch,
-                        "val": va,
-                    },
-                    self.best_path,
-                )
+                payload = {
+                    "model": self.model.state_dict(),
+                    "cfg": self.cfg,
+                    "epoch": epoch,
+                    "val": va,
+                }
+                if te is not None:
+                    payload["test"] = te
+                torch.save(payload, self.best_path)
             else:
                 bad += 1
                 if bad >= patience:

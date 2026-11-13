@@ -19,6 +19,7 @@ import torch
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
+from pc_smir_sth_aligned.evaluation.metrics import format_metrics_table
 from pc_smir_sth_aligned.pipeline import build_dataloaders, build_model, prepare_artifacts
 from pc_smir_sth_aligned.training.trainer import Trainer
 from pc_smir_sth_aligned.utils.config import load_config, print_config, save_config
@@ -69,14 +70,23 @@ def main():
         val_loader,
         epochs=int(cfg["train"]["epochs"]),
         select_metric=str(cfg["train"].get("select_metric", "recall@10")),
+        test_loader=test_loader,
     )
-    # Load best and evaluate test once.
+    # Reload best checkpoint and report final val + test (selection still on val).
     ckpt = torch.load(best, map_location=device)
     model.load_state_dict(ckpt["model"])
-    test_metrics = trainer.evaluate(test_loader)
+    val_metrics = trainer.evaluate(val_loader, desc="val")
+    test_metrics = trainer.evaluate(test_loader, desc="test")
+    with open(run_dir / "val_metrics.json", "w", encoding="utf-8") as f:
+        json.dump(val_metrics, f, indent=2)
     with open(run_dir / "test_metrics.json", "w", encoding="utf-8") as f:
         json.dump(test_metrics, f, indent=2)
-    print("Test:", json.dumps(test_metrics, indent=2))
+    print(
+        format_metrics_table(
+            {"val": val_metrics, "test": test_metrics},
+            title=f"Best checkpoint (epoch {ckpt.get('epoch', '?')})  (Acc@K = Recall@K)",
+        )
+    )
     print(f"Best checkpoint: {best}")
 
 
