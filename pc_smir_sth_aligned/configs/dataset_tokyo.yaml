@@ -1,0 +1,12 @@
+data:
+  city: tokyo
+  data_dir: data/tokyo
+  download: true
+  max_len: 20
+  # Tokyo catalog is larger; keep sampled CE unless GPU memory allows null.
+  train_neg_samples: 256
+  expand_train_prefixes: true
+
+output:
+  artifact_dir: artifacts/tokyo
+  run_dir: outputs/tokyo

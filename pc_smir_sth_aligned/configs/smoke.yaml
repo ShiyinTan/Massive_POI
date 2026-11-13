@@ -1,0 +1,33 @@
+# Fast Beijing smoke: still STH-aligned (full catalog CE + prefix expand + user head)
+seed: 42
+
+data:
+  city: beijing
+  data_dir: data/beijing
+  download: true
+  max_len: 12
+  train_neg_samples: null
+  expand_train_prefixes: true
+
+surd:
+  n_clusters: 4
+  n_bootstrap: 2
+  n_folds: 3
+
+model:
+  d: 32
+  ablation: full
+  use_user_poi: true
+  use_transition: true
+
+train:
+  epochs: 2
+  batch_size: 8
+  eval_batch_size: 4
+  patience: 2
+  select_metric: recall@1
+  lr: 0.002
+
+output:
+  artifact_dir: artifacts/beijing_smoke
+  run_dir: outputs/beijing_smoke

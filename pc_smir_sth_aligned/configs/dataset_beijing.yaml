@@ -1,0 +1,12 @@
+data:
+  city: beijing
+  data_dir: data/beijing
+  download: true
+  max_len: 20
+  # Full-catalog train CE (catalog ≈498)
+  train_neg_samples: null
+  expand_train_prefixes: true
+
+output:
+  artifact_dir: artifacts/beijing
+  run_dir: outputs/beijing

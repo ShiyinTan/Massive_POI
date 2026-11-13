@@ -1,0 +1,17 @@
+model:
+  ablation: full
+  d: 128
+  use_bilinear: true
+  use_user_poi: true
+  use_transition: true
+  user_poi_scale: 1.0
+  transition_scale: 1.0
+  pop_bias_scale: 0.5
+
+train:
+  # Overrides base when stacked: base + dataset_* + model_pcsmir.
+  epochs: 80
+  patience: 15
+  batch_size: 16
+  lr: 0.001
+  select_metric: recall@1
