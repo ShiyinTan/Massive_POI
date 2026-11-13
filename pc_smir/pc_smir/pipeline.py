@@ -8,10 +8,16 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+import pandas as pd
 import torch
 from torch.utils.data import DataLoader
 
-from pc_smir.data.dataset import NextPOIDataset, build_examples, collate_variable_candidates
+from pc_smir.data.dataset import (
+    NextPOIDataset,
+    build_examples,
+    collate_variable_candidates,
+    train_seen_user_poi_sets,
+)
 from pc_smir.data.splits import load_official_splits, split_manifest
 from pc_smir.data.vocab import VocabMaps, fit_vocab
 from pc_smir.features.sources import SourceDiscretizer  # SURD 离散源；example 构造在 dataset
@@ -53,9 +59,16 @@ def prepare_artifacts(cfg: dict[str, Any], force: bool = False) -> dict[str, Pat
         "surd_folds": art_dir / "surd_fold_profiles.pkl",
         "meta": art_dir / "prep_meta.json",
     }
-    # Cache hit: both entry scripts may call us; skip rebuild unless --force / --force-prep.
+    sthgcn_protocol = bool(cfg.get("eval", {}).get("sthgcn_protocol", False))
+    # Cache hit: both entry scripts may call us; skip rebuild unless --force / --force-prep
+    # or eval.sthgcn_protocol changed vs prep_meta.json.
     if paths["examples"].exists() and paths["surd_full"].exists() and not force:
-        return paths
+        cached_protocol = False
+        if paths["meta"].exists():
+            with open(paths["meta"], "r", encoding="utf-8") as f:
+                cached_protocol = bool(json.load(f).get("sthgcn_protocol", False))
+        if cached_protocol == sthgcn_protocol:
+            return paths
 
     # load_official_splits: 读官方 CSV → 真实划分数据（供后面建样本/词表）。
     # split_manifest: 仅从上述 DataFrame 汇总计数与协议说明 → 写入审计 JSON，不改数据。
@@ -69,10 +82,33 @@ def prepare_artifacts(cfg: dict[str, Any], force: bool = False) -> dict[str, Pat
 
     # prepare 阶段：CSV trails → Python dict examples（北京 train≈400 条），稍后 pickle。
     # NextPOIDataset / collate 在 train·eval 才用，这里不转 tensor。
+    # Train always uses same-trail prefixes. Val/test honor eval.sthgcn_protocol when set.
+    train_users, train_venues = train_seen_user_poi_sets(splits["train"])
+    all_df = (
+        pd.concat([splits["train"], splits["validation"], splits["test"]], ignore_index=True)
+        if sthgcn_protocol
+        else None
+    )
     examples = {
         "train": build_examples(splits["train"], vocab, max_len),
-        "validation": build_examples(splits["validation"], vocab, max_len),
-        "test": build_examples(splits["test"], vocab, max_len),
+        "validation": build_examples(
+            splits["validation"],
+            vocab,
+            max_len,
+            sthgcn_protocol=sthgcn_protocol,
+            all_df=all_df,
+            train_user_ids=train_users if sthgcn_protocol else None,
+            train_venue_ids=train_venues if sthgcn_protocol else None,
+        ),
+        "test": build_examples(
+            splits["test"],
+            vocab,
+            max_len,
+            sthgcn_protocol=sthgcn_protocol,
+            all_df=all_df,
+            train_user_ids=train_users if sthgcn_protocol else None,
+            train_venue_ids=train_venues if sthgcn_protocol else None,
+        ),
     }
     # Drop heavy vocab refs before pickling examples.
     for split_ex in examples.values():
@@ -193,6 +229,12 @@ def prepare_artifacts(cfg: dict[str, Any], force: bool = False) -> dict[str, Pat
         "prediction_timestamp": "last_observed_checkin_in_trail_prefix",
         "candidate_policy": "training_catalog_pois",
         "split_protocol": "massive_steps_official_trail_split",
+        "sthgcn_protocol": sthgcn_protocol,
+        "eval_protocol": (
+            "sthgcn_aligned_remove_unseen_user_poi_temporal_visibility"
+            if sthgcn_protocol
+            else "last_of_trail_full_train_catalog_oov_excluded"
+        ),
     }
     with open(paths["meta"], "w", encoding="utf-8") as f:
         json.dump(meta, f, indent=2)

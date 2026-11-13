@@ -64,6 +64,21 @@ train:
   temperature: 1.0
   entropy_coef: 0.0
 
+# STHGCN-aligned evaluation protocol (default false = legacy trail-prefix eval).
+# When eval.sthgcn_protocol is true (prepare + val/test example construction):
+#   1) remove_unseen_user_poi — drop the whole val/test sample if the user never
+#      appeared in train OR the target POI never appeared in train.
+#   2) Unseen POIs in the trajectory *prefix* (history before target) map to a
+#      single UNK/OOV embedding id (vocab OOV_ID=1); do not drop the sample solely
+#      for history OOV.
+#   3) Val/test history may use all of the user's check-ins with time before the
+#      target event (cross-trail temporal visibility), matching STHGCN's
+#      before-target visibility — not only the same-trail prefix.
+# Train examples stay same-trail prefixes. Toggle requires prepare rebuild
+# (auto when prep_meta.sthgcn_protocol differs, or pass --force).
+eval:
+  sthgcn_protocol: false
+
 output:
   artifact_dir: artifacts/beijing
   run_dir: outputs/beijing

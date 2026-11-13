@@ -20,7 +20,9 @@ import pandas as pd
 
 # 特殊 ID / reserved model IDs (never assigned to a real Beijing venue/category).
 PAD_ID = 0  # 序列填充；embedding padding_idx。例：history 右侧对齐时左侧 poi=0
-OOV_ID = 1  # 训练集未见过的 venue/category。例：encode_poi(999999) → 1
+OOV_ID = 1  # 训练集未见过的 venue/category（UNK）。例：encode_poi(999999) → 1
+# Under eval.sthgcn_protocol, history-prefix OOV POIs also map here for embedding lookup;
+# samples are not dropped solely for history OOV (only unseen *target* / *user* are).
 
 
 @dataclass
