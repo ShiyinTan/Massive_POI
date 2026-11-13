@@ -13,6 +13,7 @@ import torch
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
+from pc_smir.evaluation.metrics import format_metrics_table
 from pc_smir.pipeline import build_dataloaders, build_model, prepare_artifacts
 from pc_smir.training.trainer import Trainer
 from pc_smir.utils.config import load_config
@@ -44,8 +45,10 @@ def main():
     ckpt = torch.load(args.checkpoint, map_location=device)
     model.load_state_dict(ckpt["model"])
     trainer = Trainer(model, torch.optim.Adam(model.parameters(), lr=1e-3), device, cfg["train"], Path(cfg["output"]["run_dir"]))
+    split_name = "test" if args.split == "test" else "val"
     loader = test_loader if args.split == "test" else val_loader
-    metrics = trainer.evaluate(loader)
+    metrics = trainer.evaluate(loader, desc=split_name)
+    print(format_metrics_table({split_name: metrics}))
     print(json.dumps(metrics, indent=2))
 
 
