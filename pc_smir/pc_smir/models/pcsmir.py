@@ -55,6 +55,46 @@ class PCSMIR(nn.Module):
         )
         self.use_additive_baseline = False
 
+    def _baseline_scores(
+        self,
+        sources: torch.Tensor,
+        cand_repr: torch.Tensor,
+        cand_meta: torch.Tensor,
+    ) -> torch.Tensor:
+        bsz, n_cand, _ = cand_repr.shape
+        flat = sources.reshape(bsz, -1).unsqueeze(1).expand(-1, n_cand, -1)
+        return self.baseline(torch.cat([flat, cand_repr, cand_meta], dim=-1)).squeeze(-1)
+
+    def _route_weights(
+        self,
+        sources,
+        cand_repr,
+        cand_meta,
+        surd,
+        surd_valid,
+        source_mask,
+        expert_mask,
+        candidate_mask,
+    ) -> torch.Tensor:
+        """Ablation-aware expert mixture weights over [B, C, E]."""
+        if self.ablation == "uniform":
+            return expert_mask / expert_mask.sum(dim=-1, keepdim=True).clamp_min(1e-8)
+
+        if self.ablation == "no_surd":
+            surd = torch.zeros_like(surd)
+            surd_valid = torch.zeros_like(surd_valid)
+
+        return self.router(
+            sources,
+            cand_repr,
+            cand_meta,
+            surd,
+            surd_valid,
+            source_mask,
+            expert_mask,
+            candidate_mask,
+        )
+
     def score(self, batch) -> tuple[torch.Tensor, torch.Tensor]:
         sources, source_mask = self.sources(batch)
         cand_repr, _, _ = self.candidates(batch["candidate_poi_ids"], batch["candidate_metadata"])
@@ -62,48 +102,30 @@ class PCSMIR(nn.Module):
             sources, cand_repr, batch["candidate_metadata"], source_mask
         )
         candidate_mask = batch.get("candidate_mask")
-        surd = batch["candidate_surd"]
-        surd_valid = batch["candidate_surd_valid"]
 
-        if self.ablation == "uniform":
-            routes = expert_mask / expert_mask.sum(dim=-1, keepdim=True).clamp_min(1e-8)
-        elif self.ablation == "no_surd":
-            surd = torch.zeros_like(surd)
-            surd_valid = torch.zeros_like(surd_valid)
-            routes = self.router(
-                sources,
-                cand_repr,
-                batch["candidate_metadata"],
-                surd,
-                surd_valid,
-                source_mask,
-                expert_mask,
-                candidate_mask,
+        if self.ablation == "concat_mlp":
+            scores = self._baseline_scores(sources, cand_repr, batch["candidate_metadata"])
+            routes = torch.zeros(
+                cand_repr.shape[0],
+                cand_repr.shape[1],
+                self.experts.n_experts,
+                device=scores.device,
             )
-        elif self.ablation == "concat_mlp":
-            # Ignore experts; use baseline only.
-            bsz, n_cand, _ = cand_repr.shape
-            flat = sources.reshape(bsz, -1).unsqueeze(1).expand(-1, n_cand, -1)
-            scores = self.baseline(torch.cat([flat, cand_repr, batch["candidate_metadata"]], dim=-1)).squeeze(-1)
-            routes = torch.zeros(bsz, n_cand, self.experts.n_experts, device=scores.device)
             return scores, routes
-        else:
-            routes = self.router(
-                sources,
-                cand_repr,
-                batch["candidate_metadata"],
-                surd,
-                surd_valid,
-                source_mask,
-                expert_mask,
-                candidate_mask,
-            )
 
+        routes = self._route_weights(
+            sources,
+            cand_repr,
+            batch["candidate_metadata"],
+            batch["candidate_surd"],
+            batch["candidate_surd_valid"],
+            source_mask,
+            expert_mask,
+            candidate_mask,
+        )
         scores = (routes * expert_logits).sum(dim=-1)
         if self.use_additive_baseline:
-            bsz, n_cand, _ = cand_repr.shape
-            flat = sources.reshape(bsz, -1).unsqueeze(1).expand(-1, n_cand, -1)
-            scores = scores + self.baseline(torch.cat([flat, cand_repr, batch["candidate_metadata"]], dim=-1)).squeeze(-1)
+            scores = scores + self._baseline_scores(sources, cand_repr, batch["candidate_metadata"])
         if candidate_mask is not None:
             scores = scores.masked_fill(candidate_mask <= 0, torch.finfo(scores.dtype).min / 4)
         return scores, routes

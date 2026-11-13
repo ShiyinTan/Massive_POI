@@ -20,37 +20,18 @@ from pc_smir.data.dataset import (
 )
 from pc_smir.data.splits import load_official_splits, split_manifest
 from pc_smir.data.vocab import VocabMaps, fit_vocab
-from pc_smir.features.sources import SourceDiscretizer  # SURD 离散源；example 构造在 dataset
+from pc_smir.features.sources import SourceDiscretizer
 from pc_smir.models.pcsmir import PCSMIR
 from pc_smir.surd.profiles import ProfileArtifacts, crossfit_profiles
 
 
-def prepare_artifacts(cfg: dict[str, Any], force: bool = False) -> dict[str, Path]:
-    """Offline data prep: splits → vocab/catalog → examples → SURD profiles.
+# ---------------------------------------------------------------------------
+# Artifact I/O
+# ---------------------------------------------------------------------------
 
-    作用 / Role（训练循环之前的一次性离线流水线）:
-      1) 读官方 Massive-STEPS train/val/test CSV
-      2) 仅在 train 上 fit 词表，得到 catalog（真实 POI 模型 ID）
-      3) 把每条 trail 建成无泄漏的 next-POI Python examples
-      4) 离散化 Q1–Q4 并离线估计/交叉拟合 per-POI SURD profiles
-      5) 全部写入 ``cfg['output']['artifact_dir']``，供 Dataset/模型复用
 
-    幂等 / Idempotent:
-      若 ``examples.pkl`` 与 ``surd_profiles_full.json`` 已存在且 ``force=False``，
-      直接返回路径字典，**不重算**（所以 train.py 里再调一次通常很快）。
-
-    谁调用 / Callers:
-      - ``scripts/prepare_data.py``：只做准备，方便单独检查/缓存产物
-      - ``scripts/train.py``：训练前再调一次，保证 artifacts 齐全（已存在则跳过）
-      两者都调是刻意设计：prepare 可独立跑；train 可单入口自给自足。
-      不是“准备两遍重活”——第二次命中缓存后几乎只返回路径。
-    """
-    city = cfg["data"]["city"]
-    data_dir = Path(cfg["data"]["data_dir"])
-    art_dir = Path(cfg["output"]["artifact_dir"])
-    art_dir.mkdir(parents=True, exist_ok=True)
-
-    paths = {
+def _artifact_paths(art_dir: Path) -> dict[str, Path]:
+    return {
         "vocab": art_dir / "vocab.json",
         "manifest": art_dir / "split_manifest.json",
         "examples": art_dir / "examples.pkl",
@@ -59,164 +40,108 @@ def prepare_artifacts(cfg: dict[str, Any], force: bool = False) -> dict[str, Pat
         "surd_folds": art_dir / "surd_fold_profiles.pkl",
         "meta": art_dir / "prep_meta.json",
     }
-    sthgcn_protocol = bool(cfg.get("eval", {}).get("sthgcn_protocol", False))
-    # Cache hit: both entry scripts may call us; skip rebuild unless --force / --force-prep
-    # or eval.sthgcn_protocol changed vs prep_meta.json.
-    if paths["examples"].exists() and paths["surd_full"].exists() and not force:
-        cached_protocol = False
-        if paths["meta"].exists():
-            with open(paths["meta"], "r", encoding="utf-8") as f:
-                cached_protocol = bool(json.load(f).get("sthgcn_protocol", False))
-        if cached_protocol == sthgcn_protocol:
-            return paths
 
-    # load_official_splits: 读官方 CSV → 真实划分数据（供后面建样本/词表）。
-    # split_manifest: 仅从上述 DataFrame 汇总计数与协议说明 → 写入审计 JSON，不改数据。
-    splits = load_official_splits(city, data_dir, download=bool(cfg["data"].get("download", True)))
-    with open(paths["manifest"], "w", encoding="utf-8") as f:
-        json.dump(split_manifest(splits), f, indent=2)
 
-    max_len = int(cfg["data"].get("max_len", 20))
-    vocab = fit_vocab(splits["train"], spatial_cell_size_m=float(cfg["data"].get("spatial_cell_size_m", 500)))
-    vocab.save(paths["vocab"])
+def _cached_sthgcn_protocol(meta_path: Path) -> bool:
+    if not meta_path.exists():
+        return False
+    with open(meta_path, "r", encoding="utf-8") as f:
+        return bool(json.load(f).get("sthgcn_protocol", False))
 
-    # prepare 阶段：CSV trails → Python dict examples（北京 train≈400 条），稍后 pickle。
-    # NextPOIDataset / collate 在 train·eval 才用，这里不转 tensor。
-    # Train always uses same-trail prefixes. Val/test honor eval.sthgcn_protocol when set.
+
+def _can_reuse_artifacts(paths: dict[str, Path], force: bool, sthgcn_protocol: bool) -> bool:
+    """Reuse cache when examples+SURD exist, force is off, and protocol matches meta."""
+    if force or not paths["examples"].exists() or not paths["surd_full"].exists():
+        return False
+    return _cached_sthgcn_protocol(paths["meta"]) == sthgcn_protocol
+
+
+def _with_vocab(ex: dict, vocab: VocabMaps) -> dict:
+    out = dict(ex)
+    out["vocab"] = vocab
+    return out
+
+
+def _strip_vocab_refs(examples: dict[str, list[dict]]) -> None:
+    for split_ex in examples.values():
+        for ex in split_ex:
+            ex.pop("vocab", None)
+
+
+def _states_for_examples(
+    ex_list: list[dict],
+    vocab: VocabMaps,
+    disc: SourceDiscretizer,
+) -> tuple[np.ndarray, dict[str, np.ndarray], np.ndarray]:
+    """Map examples → (target_poi_ids, {Q1..Q4: state_ids}, query_timestamps)."""
+    targets: list[int] = []
+    mats: dict[str, list[int]] = {"Q1": [], "Q2": [], "Q3": [], "Q4": []}
+    times: list[float] = []
+    for ex in ex_list:
+        st = disc.transform_example(_with_vocab(ex, vocab))
+        for k in mats:
+            mats[k].append(st[k])
+        targets.append(ex["target_poi_id"])
+        times.append(ex["query_time"].timestamp())
+    return (
+        np.asarray(targets, dtype=np.int64),
+        {k: np.asarray(v, dtype=np.int64) for k, v in mats.items()},
+        np.asarray(times, dtype=np.float64),
+    )
+
+
+def _fit_discretizer(
+    train_examples: list[dict],
+    vocab: VocabMaps,
+    surd_cfg: dict[str, Any],
+) -> SourceDiscretizer:
+    train_for_disc = [_with_vocab(ex, vocab) for ex in train_examples]
+    return SourceDiscretizer(
+        n_clusters=int(surd_cfg.get("n_clusters", 8)),
+        hour_bins=int(surd_cfg.get("hour_bins", 8)),
+    ).fit(train_for_disc)
+
+
+def _build_split_examples(
+    splits: dict[str, Any],
+    vocab: VocabMaps,
+    max_len: int,
+    sthgcn_protocol: bool,
+) -> dict[str, list[dict]]:
+    """Build train/val/test examples; val/test honor ``sthgcn_protocol`` when set."""
     train_users, train_venues = train_seen_user_poi_sets(splits["train"])
     all_df = (
         pd.concat([splits["train"], splits["validation"], splits["test"]], ignore_index=True)
         if sthgcn_protocol
         else None
     )
-    examples = {
-        "train": build_examples(splits["train"], vocab, max_len),
-        "validation": build_examples(
-            splits["validation"],
-            vocab,
-            max_len,
-            sthgcn_protocol=sthgcn_protocol,
-            all_df=all_df,
-            train_user_ids=train_users if sthgcn_protocol else None,
-            train_venue_ids=train_venues if sthgcn_protocol else None,
-        ),
-        "test": build_examples(
-            splits["test"],
-            vocab,
-            max_len,
-            sthgcn_protocol=sthgcn_protocol,
-            all_df=all_df,
-            train_user_ids=train_users if sthgcn_protocol else None,
-            train_venue_ids=train_venues if sthgcn_protocol else None,
-        ),
+    eval_kwargs = {
+        "sthgcn_protocol": sthgcn_protocol,
+        "all_df": all_df,
+        "train_user_ids": train_users if sthgcn_protocol else None,
+        "train_venue_ids": train_venues if sthgcn_protocol else None,
     }
-    # Drop heavy vocab refs before pickling examples.
-    for split_ex in examples.values():
-        for ex in split_ex:
-            ex.pop("vocab", None)
+    return {
+        "train": build_examples(splits["train"], vocab, max_len),
+        "validation": build_examples(splits["validation"], vocab, max_len, **eval_kwargs),
+        "test": build_examples(splits["test"], vocab, max_len, **eval_kwargs),
+    }
 
-    # ----- Sources for SURD (离散信息源状态，不是神经网络 embedding) -----
-    # SourceDiscretizer（features/sources.py）只在 train examples 上 fit：
-    #   Q1: 历史类别直方图+近期 POI 摘要 → KMeans 簇 id
-    #   Q2: query_time 的 hour_bin × weekday/weekend（无需 KMeans）
-    #   Q3: 末位置/格子/位移等摘要 → KMeans 簇 id
-    #   Q4: stable_user_features[8] 标准化后 → KMeans 簇 id
-    # 输入: train dict examples（需临时挂回 vocab 供 spatial_cell_id）
-    # disc 长什么样（北京 smoke, n_clusters=4 实测）:
-    #   类型: SourceDiscretizer 对象（不是 ndarray）
-    #   disc.q1_model / q3_model / q4_model: sklearn KMeans, n_clusters_=4
-    #   disc.q4_mean / q4_std: float32, shape (8,)
-    #   disc.transform_example(ex) → dict[str,int]，例 {"Q1":1,"Q2":6,"Q3":2,"Q4":1}
-    # Fit source discretizer on training examples (need vocab back for transform vectors).
-    train_for_disc = []
-    for ex in examples["train"]:
-        e = dict(ex)
-        e["vocab"] = vocab
-        train_for_disc.append(e)
-    disc = SourceDiscretizer(
-        n_clusters=int(cfg.get("surd", {}).get("n_clusters", 8)),
-        hour_bins=int(cfg.get("surd", {}).get("hour_bins", 8)),
-    ).fit(train_for_disc)
 
-    def states_for(ex_list: list[dict]) -> tuple[np.ndarray, dict[str, np.ndarray], np.ndarray]:
-        """Map examples → (target_poi_ids, {Q1..Q4: state_ids}, query_timestamps).
+def _attach_train_fold_ids(train_examples: list[dict], fold_id: np.ndarray) -> None:
+    for i, ex in enumerate(train_examples):
+        ex["fold_id"] = int(fold_id[i])
 
-        把每条 example 变成 SURD 估计用的一行。北京 smoke train 实测返回值形状:
-          targets:      np.int64, shape (400,)   值域约 [2, 498]，例 [40, 310, 494, ...]
-          mats["Q1"]:   np.int64, shape (400,)   簇 id，值域 [0, 3]（n_clusters=4）
-          mats["Q2"]:   np.int64, shape (400,)   时间状态，值域 [0, 15]，例 [6, 6, 5, 11, ...]
-          mats["Q3"]:   np.int64, shape (400,)   簇 id [0, 3]
-          mats["Q4"]:   np.int64, shape (400,)   簇 id [0, 3]
-          times:        np.float64, shape (400,) Unix 秒，例 1.3577e9 ...
-        """
-        targets = []
-        mats = {"Q1": [], "Q2": [], "Q3": [], "Q4": []}
-        times = []
-        for ex in ex_list:
-            e = dict(ex)
-            e["vocab"] = vocab
-            st = disc.transform_example(e)
-            for k in mats:
-                mats[k].append(st[k])
-            targets.append(ex["target_poi_id"])
-            times.append(ex["query_time"].timestamp())
-        return (
-            np.asarray(targets, dtype=np.int64),
-            {k: np.asarray(v, dtype=np.int64) for k, v in mats.items()},
-            np.asarray(times, dtype=np.float64),
-        )
 
-    # 仅用 train 行估计 SURD（val/test 目标不得参与）。
-    # 赋值后（北京 smoke）:
-    #   train_targets: (400,) int64
-    #   train_states:  dict 4 键 → 各 (400,) int64
-    #   train_times:   (400,) float64
-    #   catalog:       list[int] 长度 498，头几个常为 [2,3,4,5,6]（跳过 pad/oov）
-    train_targets, train_states, train_times = states_for(examples["train"])
-    catalog = sorted({p for p in vocab.id2poi if p >= 2})
-
-    # ----- Offline SURD profiles（前向里不再跑估计器）-----
-    # crossfit_profiles（surd/profiles.py）内部对每个 POI 调 estimate_surd
-    # （surd/estimator.py, mmi_pid_discrete_v1）：
-    #   输入: Y_p=1[target==p] 与 train_states；N=400 行, |catalog|=498
-    #   输出原子: unique(Q_i)、pair/triple synergy、redundancy（冗余仅诊断）
-    #   再做 bootstrap SE、κ 收缩、robust 归一化 → 每 POI 一条 float32 特征向量
-    # 返回值长什么样（北京 smoke）:
-    #   full:     ProfileArtifacts；full.poi_features[pid] → float32 向量，长度=surd_dim
-    #             （atoms×5 通道；smoke 配置下通常几十维）
-    #   folds:    list[ProfileArtifacts]，len=n_folds（smoke 常 3）
-    #   fold_id:  np.int64, shape (400,)，每条 train example 的时间块编号 ∈ {0..n_folds-1}
-    surd_cfg = dict(cfg.get("surd", {}))
-    full, folds, fold_id = crossfit_profiles(
-        train_targets,
-        train_states,
-        catalog,
-        n_folds=int(surd_cfg.get("n_folds", 5)),
-        config=surd_cfg,
-        timestamps=train_times if surd_cfg.get("temporal_crossfit", True) else None,
-    )
-    full.save(paths["surd_full"])
-    with open(paths["surd_folds"], "wb") as f:
-        pickle.dump({"folds": folds, "fold_id": fold_id}, f)
-    with open(paths["discretizer"], "wb") as f:
-        pickle.dump(disc, f)
-
-    # 给每条 train example 挂 fold_id；lookup 得到该 fold 下 target 的 SURD 向量。
-    # 北京 smoke: feats[0] 为 float32, shape (surd_dim,)；valid 为标量 float。
-    # 候选 SURD 在 Dataset 按 candidate_poi_ids 查表，不在这里展开成 [N,C,F]。
-    train_surd_feats = []
-    train_surd_valid = []
-    for i, ex in enumerate(examples["train"]):
-        fid = int(fold_id[i])
-        feats, valid = folds[fid].lookup([ex["target_poi_id"]])
-        # Store only target profile on example; candidate profiles filled at dataset time from tables.
-        ex["fold_id"] = fid
-        train_surd_feats.append(feats[0])
-        train_surd_valid.append(float(valid[0]))
-
-    with open(paths["examples"], "wb") as f:
-        pickle.dump({"examples": examples, "catalog": catalog, "surd_dim": full.feature_dim}, f)
-
+def _write_prep_meta(
+    path: Path,
+    *,
+    city: str,
+    examples: dict[str, list[dict]],
+    vocab: VocabMaps,
+    full: ProfileArtifacts,
+    sthgcn_protocol: bool,
+) -> None:
     meta = {
         "city": city,
         "n_train_examples": len(examples["train"]),
@@ -236,117 +161,183 @@ def prepare_artifacts(cfg: dict[str, Any], force: bool = False) -> dict[str, Pat
             else "last_of_trail_full_train_catalog_oov_excluded"
         ),
     }
-    with open(paths["meta"], "w", encoding="utf-8") as f:
+    with open(path, "w", encoding="utf-8") as f:
         json.dump(meta, f, indent=2)
+
+
+# ---------------------------------------------------------------------------
+# Prepare pipeline
+# ---------------------------------------------------------------------------
+
+
+def prepare_artifacts(cfg: dict[str, Any], force: bool = False) -> dict[str, Path]:
+    """Offline data prep: splits → vocab/catalog → examples → SURD profiles.
+
+    Idempotent when artifacts exist, ``force=False``, and ``eval.sthgcn_protocol``
+    matches the cached ``prep_meta.json``.
+    """
+    city = cfg["data"]["city"]
+    data_dir = Path(cfg["data"]["data_dir"])
+    art_dir = Path(cfg["output"]["artifact_dir"])
+    art_dir.mkdir(parents=True, exist_ok=True)
+    paths = _artifact_paths(art_dir)
+    sthgcn_protocol = bool(cfg.get("eval", {}).get("sthgcn_protocol", False))
+
+    if _can_reuse_artifacts(paths, force, sthgcn_protocol):
+        return paths
+
+    # Stage 1 — official splits + audit manifest
+    splits = load_official_splits(city, data_dir, download=bool(cfg["data"].get("download", True)))
+    with open(paths["manifest"], "w", encoding="utf-8") as f:
+        json.dump(split_manifest(splits), f, indent=2)
+
+    # Stage 2 — train-only vocab + next-POI examples
+    max_len = int(cfg["data"].get("max_len", 20))
+    vocab = fit_vocab(splits["train"], spatial_cell_size_m=float(cfg["data"].get("spatial_cell_size_m", 500)))
+    vocab.save(paths["vocab"])
+    examples = _build_split_examples(splits, vocab, max_len, sthgcn_protocol)
+    _strip_vocab_refs(examples)
+
+    # Stage 3 — discrete Q1–Q4 states on train rows only
+    surd_cfg = dict(cfg.get("surd", {}))
+    disc = _fit_discretizer(examples["train"], vocab, surd_cfg)
+    train_targets, train_states, train_times = _states_for_examples(examples["train"], vocab, disc)
+    catalog = sorted({p for p in vocab.id2poi if p >= 2})
+
+    # Stage 4 — offline SURD profiles (full + cross-fit folds)
+    full, folds, fold_id = crossfit_profiles(
+        train_targets,
+        train_states,
+        catalog,
+        n_folds=int(surd_cfg.get("n_folds", 5)),
+        config=surd_cfg,
+        timestamps=train_times if surd_cfg.get("temporal_crossfit", True) else None,
+    )
+    full.save(paths["surd_full"])
+    with open(paths["surd_folds"], "wb") as f:
+        pickle.dump({"folds": folds, "fold_id": fold_id}, f)
+    with open(paths["discretizer"], "wb") as f:
+        pickle.dump(disc, f)
+
+    # Stage 5 — annotate train rows + persist
+    _attach_train_fold_ids(examples["train"], fold_id)
+    with open(paths["examples"], "wb") as f:
+        pickle.dump({"examples": examples, "catalog": catalog, "surd_dim": full.feature_dim}, f)
+    _write_prep_meta(
+        paths["meta"],
+        city=city,
+        examples=examples,
+        vocab=vocab,
+        full=full,
+        sthgcn_protocol=sthgcn_protocol,
+    )
     return paths
 
 
-def _profile_tables(art: ProfileArtifacts) -> tuple[dict[int, np.ndarray], dict[int, float], int]:
-    return art.poi_features, art.poi_valid, art.feature_dim
+# ---------------------------------------------------------------------------
+# Dataloaders + model
+# ---------------------------------------------------------------------------
+
+
+def _mean_fold_surd_tables(
+    catalog: list[int],
+    folds: list[ProfileArtifacts],
+) -> tuple[dict[int, np.ndarray], dict[int, float]]:
+    """Conservative train lookup: mean of fold profiles that contain each POI."""
+    train_feats: dict[int, np.ndarray] = {}
+    train_valid: dict[int, float] = {}
+    for pid in catalog:
+        mats = [fp.poi_features[pid] for fp in folds if pid in fp.poi_features]
+        vals = [fp.poi_valid.get(pid, 0.0) for fp in folds if pid in fp.poi_features]
+        if not mats:
+            continue
+        train_feats[pid] = np.mean(np.stack(mats, axis=0), axis=0).astype(np.float32)
+        train_valid[pid] = float(np.mean(vals))
+    return train_feats, train_valid
+
+
+def _make_dataset(
+    examples: list[dict],
+    vocab: VocabMaps,
+    max_len: int,
+    catalog: list[int],
+    surd_feats: dict[int, np.ndarray],
+    surd_valid: dict[int, float],
+    surd_dim: int,
+    *,
+    neg_samples: int | None,
+    seed: int,
+) -> NextPOIDataset:
+    return NextPOIDataset(
+        examples,
+        vocab,
+        max_len,
+        catalog,
+        surd_table=surd_feats,
+        surd_valid=surd_valid,
+        surd_dim=surd_dim,
+        neg_samples=neg_samples,
+        seed=seed,
+    )
+
+
+def _make_loader(dataset: NextPOIDataset, batch_size: int, *, shuffle: bool) -> DataLoader:
+    return DataLoader(
+        dataset,
+        batch_size=batch_size,
+        shuffle=shuffle,
+        collate_fn=collate_variable_candidates,
+        num_workers=0,
+    )
 
 
 def build_dataloaders(cfg: dict[str, Any], paths: dict[str, Path]):
+    """Load prepared artifacts → train/val/test DataLoaders.
+
+    Train candidate SURD uses the mean of fold profiles; val/test use the full
+    train-estimated profile table.
+    """
     vocab = VocabMaps.load(paths["vocab"])
     with open(paths["examples"], "rb") as f:
         blob = pickle.load(f)
     examples = blob["examples"]
     catalog = blob["catalog"]
+
     surd_full = ProfileArtifacts.load(paths["surd_full"])
     with open(paths["surd_folds"], "rb") as f:
-        fold_blob = pickle.load(f)
-    folds: list[ProfileArtifacts] = fold_blob["folds"]
-    fold_id = fold_blob["fold_id"]
+        folds: list[ProfileArtifacts] = pickle.load(f)["folds"]
 
-    # Training table: for each POI, use a merge of fold profiles is wrong;
-    # instead dataset looks up candidate profiles from FULL train profiles for candidates,
-    # while the method is still cross-fit for the *target-informed* concern via fold artifacts.
-    # Spec: training examples use cross-fitted profiles; candidates looked up from fold table
-    # associated with that example's fold.
-    # Practical approach: build per-fold feature tables and in dataset use full table for speed,
-    # documenting that candidate SURD for training uses leave-one-fold profiles via a fused table.
-    # Here we construct training candidate SURD from fold-0..K average of non-containing... 
-    # Simpler correct approach: use full profiles for candidate lookup at train time only if
-    # ablation says so; default uses cross-fit by attaching fold-specific tables in a wrapper.
-
-    # Build a training SURD lookup that for each POI uses the mean of fold profiles
-    # (each fold excludes some data) — conservative. For eval use full.
-    train_feats: dict[int, np.ndarray] = {}
-    train_valid: dict[int, float] = {}
-    for pid in catalog:
-        mats = []
-        vals = []
-        for fp in folds:
-            if pid in fp.poi_features:
-                mats.append(fp.poi_features[pid])
-                vals.append(fp.poi_valid.get(pid, 0.0))
-        if mats:
-            train_feats[pid] = np.mean(np.stack(mats, axis=0), axis=0).astype(np.float32)
-            train_valid[pid] = float(np.mean(vals))
-    full_feats, full_valid, surd_dim = _profile_tables(surd_full)
+    train_feats, train_valid = _mean_fold_surd_tables(catalog, folds)
+    full_feats, full_valid = surd_full.poi_features, surd_full.poi_valid
+    surd_dim = surd_full.feature_dim
 
     max_len = int(cfg["data"].get("max_len", 20))
     neg = cfg["data"].get("train_neg_samples", None)
-    bs = int(cfg["train"].get("batch_size", 16))
+    train_bs = int(cfg["train"].get("batch_size", 16))
+    eval_bs = int(cfg["train"].get("eval_batch_size", 8))
+    seed = int(cfg.get("seed", 0))
 
-    # train/eval：把 examples 变成张量 Dataset。
-    # 训练可 sampled softmax（neg_samples）；val/test 全量 catalog（北京 C≈498）。
-    train_ds = NextPOIDataset(
-        examples["train"],
-        vocab,
-        max_len,
-        catalog,
-        surd_table=train_feats,
-        surd_valid=train_valid,
-        surd_dim=surd_dim,
-        neg_samples=neg,
-        seed=int(cfg.get("seed", 0)),
+    train_ds = _make_dataset(
+        examples["train"], vocab, max_len, catalog, train_feats, train_valid, surd_dim,
+        neg_samples=neg, seed=seed,
     )
-    val_ds = NextPOIDataset(
-        examples["validation"],
-        vocab,
-        max_len,
-        catalog,
-        surd_table=full_feats,
-        surd_valid=full_valid,
-        surd_dim=surd_dim,
-        neg_samples=None,
-        seed=0,
+    val_ds = _make_dataset(
+        examples["validation"], vocab, max_len, catalog, full_feats, full_valid, surd_dim,
+        neg_samples=None, seed=0,
     )
-    test_ds = NextPOIDataset(
-        examples["test"],
-        vocab,
-        max_len,
-        catalog,
-        surd_table=full_feats,
-        surd_valid=full_valid,
-        surd_dim=surd_dim,
-        neg_samples=None,
-        seed=0,
+    test_ds = _make_dataset(
+        examples["test"], vocab, max_len, catalog, full_feats, full_valid, surd_dim,
+        neg_samples=None, seed=0,
     )
 
-    # collate_variable_candidates：pad 候选维到 batch 内 max C，并加 candidate_mask。
-    train_loader = DataLoader(
-        train_ds,
-        batch_size=bs,
-        shuffle=True,
-        collate_fn=collate_variable_candidates,
-        num_workers=0,
+    return (
+        _make_loader(train_ds, train_bs, shuffle=True),
+        _make_loader(val_ds, eval_bs, shuffle=False),
+        _make_loader(test_ds, eval_bs, shuffle=False),
+        vocab,
+        surd_dim,
+        catalog,
     )
-    val_loader = DataLoader(
-        val_ds,
-        batch_size=int(cfg["train"].get("eval_batch_size", 8)),
-        shuffle=False,
-        collate_fn=collate_variable_candidates,
-        num_workers=0,
-    )
-    test_loader = DataLoader(
-        test_ds,
-        batch_size=int(cfg["train"].get("eval_batch_size", 8)),
-        shuffle=False,
-        collate_fn=collate_variable_candidates,
-        num_workers=0,
-    )
-    return train_loader, val_loader, test_loader, vocab, surd_dim, catalog
 
 
 def build_model(cfg: dict[str, Any], vocab: VocabMaps, surd_dim: int) -> PCSMIR:

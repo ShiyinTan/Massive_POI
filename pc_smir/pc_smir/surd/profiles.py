@@ -224,20 +224,140 @@ def _channels(
     return np.stack([robust_z, sign, log_se, rel, val], axis=-1).reshape(-1).astype(np.float32)
 
 
+def _bootstrap_atom_se(
+    y: np.ndarray,
+    states: dict[str, np.ndarray],
+    poi_id: int,
+    atoms: np.ndarray,
+    pairs,
+    triples,
+    estimator_cfg: dict,
+    n_bootstrap: int,
+) -> np.ndarray:
+    """Stratified bootstrap SE over positives/negatives for one POI's atoms."""
+    n = len(y)
+    rng = np.random.default_rng(abs(hash((int(poi_id), n))) % (2**32))
+    pos_idx = np.where(y == 1)[0]
+    neg_idx = np.where(y == 0)[0]
+    boot = []
+    for _ in range(int(n_bootstrap)):
+        if len(neg_idx) == 0:
+            break
+        take_pos = rng.choice(pos_idx, size=len(pos_idx), replace=True)
+        take_neg = rng.choice(neg_idx, size=len(neg_idx), replace=True)
+        idx = np.concatenate([take_pos, take_neg])
+        rb = estimate_surd(y[idx], {k: v[idx] for k, v in states.items()}, SOURCE_NAMES, estimator_cfg)
+        boot.append(_atom_vector(rb, pairs, triples))
+    return np.std(np.stack(boot, axis=0), axis=0) if boot else np.zeros_like(atoms)
+
+
+def _global_atom_stats(
+    raw_atoms: dict[int, np.ndarray],
+    n_features: int,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Median / IQR / prior over POIs that have estimated atoms."""
+    if not raw_atoms:
+        zeros = np.zeros(n_features, dtype=np.float64)
+        return zeros, zeros.copy(), np.ones_like(zeros)
+    mat = np.stack(list(raw_atoms.values()), axis=0)
+    median = np.median(mat, axis=0)
+    iqr = np.maximum(np.percentile(mat, 75, axis=0) - np.percentile(mat, 25, axis=0), 1e-6)
+    return median.copy(), median, iqr  # prior = median of supported POIs
+
+
+def _estimate_raw_atoms(
+    target_poi_ids: np.ndarray,
+    states: dict[str, np.ndarray],
+    eligible: list[int],
+    pairs,
+    triples,
+    estimator_cfg: dict,
+    n_bootstrap: int,
+) -> tuple[dict[int, np.ndarray], dict[int, np.ndarray], dict[int, dict]]:
+    """First pass: SURD atoms + bootstrap SE for POIs with enough positives."""
+    n = len(target_poi_ids)
+    raw_atoms: dict[int, np.ndarray] = {}
+    ses: dict[int, np.ndarray] = {}
+    raw_meta: dict[int, dict] = {}
+    for p in eligible:
+        y = (target_poi_ids == p).astype(np.int64)
+        result = estimate_surd(y, states, SOURCE_NAMES, estimator_cfg)
+        atoms = _atom_vector(result, pairs, triples)
+        se = _bootstrap_atom_se(y, states, p, atoms, pairs, triples, estimator_cfg, n_bootstrap)
+        raw_atoms[p] = atoms
+        ses[p] = se
+        raw_meta[p] = {
+            "n_total": int(n),
+            "n_positive": int(y.sum()),
+            "n_negative": int((1 - y).sum()),
+            "atoms": atoms.tolist(),
+            "se": se.tolist(),
+            "redundancy": {f"{a}_{b}": float(result["redundancy"][(a, b)]) for a, b in pairs},
+        }
+    return raw_atoms, ses, raw_meta
+
+
+def _pack_poi_profiles(
+    catalog_poi_ids: list[int],
+    pos_counts: dict[int, int],
+    raw_atoms: dict[int, np.ndarray],
+    ses: dict[int, np.ndarray],
+    raw_meta: dict[int, dict],
+    global_prior: np.ndarray,
+    median: np.ndarray,
+    iqr: np.ndarray,
+    *,
+    kappa: float,
+    min_positive: int,
+    clip: float,
+    n_total: int,
+) -> tuple[dict[int, np.ndarray], dict[int, float], dict[int, Any]]:
+    """κ-shrink + channel-pack every catalog POI (unsupported → prior, valid=0)."""
+    poi_features: dict[int, np.ndarray] = {}
+    poi_valid: dict[int, float] = {}
+    poi_raw: dict[int, Any] = {}
+    for p in catalog_poi_ids:
+        n_pos = pos_counts.get(p, 0)
+        reliability = n_pos / (n_pos + kappa) if n_pos > 0 else 0.0
+        if p in raw_atoms:
+            shrunk = reliability * raw_atoms[p] + (1.0 - reliability) * global_prior
+            valid = 1.0 if n_pos >= min_positive else 0.0
+            feat = _channels(shrunk, ses[p], reliability, valid, median, iqr, clip=clip)
+            poi_features[p] = feat
+            poi_valid[p] = valid
+            poi_raw[p] = {
+                **raw_meta[p],
+                "shrunk": shrunk.tolist(),
+                "reliability": reliability,
+                "valid": valid,
+                "prior_level": "global",
+            }
+        else:
+            feat = _channels(
+                global_prior, np.zeros_like(global_prior), reliability, 0.0, median, iqr, clip=clip
+            )
+            poi_features[p] = feat
+            poi_valid[p] = 0.0
+            poi_raw[p] = {
+                "n_total": int(n_total),
+                "n_positive": int(n_pos),
+                "n_negative": int(n_total - n_pos),
+                "reliability": reliability,
+                "valid": 0.0,
+                "prior_level": "global_or_unknown",
+            }
+    return poi_features, poi_valid, poi_raw
+
+
 def estimate_profiles_for_rows(
     target_poi_ids: np.ndarray,
     source_state_matrix: dict[str, np.ndarray],
     catalog_poi_ids: list[int],
     config: dict | None = None,
 ) -> ProfileArtifacts:
-    """在给定行集合上为 catalog 每个 POI 估计一张 SURD profile 表.
+    """Estimate one SURD profile table for catalog POIs on the given rows.
 
-    作用 / Role:
-      对每个 ``p ∈ catalog``，令 ``Y_p = 1[target==p]``，调 ``estimate_surd`` 得 atoms；
-      bootstrap 得 SE；用 κ 收缩到 ``global_prior``；再 ``_channels`` 成模型向量。
-      正例不足 ``min_positive`` 的 POI：用先验填特征，``valid=0``。
-
-    被 ``crossfit_profiles``（每折子集 + full train）调用；本身不做交叉拟合。
+    Does not cross-fit; ``crossfit_profiles`` calls this on fold subsets + full train.
     """
     cfg = {
         "alpha": 0.5,
@@ -257,100 +377,28 @@ def estimate_profiles_for_rows(
 
     n = len(target_poi_ids)
     states = {k: np.asarray(v).astype(np.int64) for k, v in source_state_matrix.items()}
-
-    # First pass: raw atoms for POIs with support.
-    raw_atoms: dict[int, np.ndarray] = {}
-    raw_meta: dict[int, dict] = {}
-    ses: dict[int, np.ndarray] = {}
-
     pos_counts = {int(p): int((target_poi_ids == p).sum()) for p in catalog_poi_ids}
     eligible = [p for p in catalog_poi_ids if pos_counts.get(p, 0) >= int(cfg["min_positive"])]
+    estimator_cfg = {"alpha": cfg["alpha"], "pairs": pairs, "triples": triples}
 
-    estimator_cfg = {
-        "alpha": cfg["alpha"],
-        "pairs": pairs,
-        "triples": triples,
-    }
-
-    for p in eligible:
-        y = (target_poi_ids == p).astype(np.int64)
-        result = estimate_surd(y, states, SOURCE_NAMES, estimator_cfg)
-        atoms = _atom_vector(result, pairs, triples)
-        # Bootstrap SE (stratified by keeping positives).
-        boot = []
-        rng = np.random.default_rng(abs(hash((int(p), n))) % (2**32))
-        pos_idx = np.where(y == 1)[0]
-        neg_idx = np.where(y == 0)[0]
-        for b in range(int(cfg["n_bootstrap"])):
-            if len(neg_idx) == 0:
-                break
-            take_pos = rng.choice(pos_idx, size=len(pos_idx), replace=True)
-            take_neg = rng.choice(neg_idx, size=len(neg_idx), replace=True)
-            idx = np.concatenate([take_pos, take_neg])
-            yb = y[idx]
-            sb = {k: v[idx] for k, v in states.items()}
-            rb = estimate_surd(yb, sb, SOURCE_NAMES, estimator_cfg)
-            boot.append(_atom_vector(rb, pairs, triples))
-        se = np.std(np.stack(boot, axis=0), axis=0) if boot else np.zeros_like(atoms)
-        raw_atoms[p] = atoms
-        ses[p] = se
-        raw_meta[p] = {
-            "n_total": int(n),
-            "n_positive": int(y.sum()),
-            "n_negative": int((1 - y).sum()),
-            "atoms": atoms.tolist(),
-            "se": se.tolist(),
-            "redundancy": {f"{a}_{b}": float(result["redundancy"][(a, b)]) for a, b in pairs},
-        }
-
-    if raw_atoms:
-        mat = np.stack(list(raw_atoms.values()), axis=0)
-        global_prior = np.median(mat, axis=0)
-        median = np.median(mat, axis=0)
-        q75 = np.percentile(mat, 75, axis=0)
-        q25 = np.percentile(mat, 25, axis=0)
-        iqr = np.maximum(q75 - q25, 1e-6)
-    else:
-        global_prior = np.zeros(len(feature_names), dtype=np.float64)
-        median = global_prior.copy()
-        iqr = np.ones_like(median)
-
-    kappa = float(cfg["kappa"])
-    poi_features: dict[int, np.ndarray] = {}
-    poi_valid: dict[int, float] = {}
-    poi_raw: dict[int, Any] = {}
-
-    for p in catalog_poi_ids:
-        n_pos = pos_counts.get(p, 0)
-        reliability = n_pos / (n_pos + kappa) if n_pos > 0 else 0.0
-        if p in raw_atoms:
-            # κ-shrinkage toward global prior before channel packing.
-            shrunk = reliability * raw_atoms[p] + (1.0 - reliability) * global_prior
-            valid = 1.0 if n_pos >= int(cfg["min_positive"]) else 0.0
-            se = ses[p]
-            feat = _channels(shrunk, se, reliability, valid, median, iqr, clip=float(cfg["clip"]))
-            poi_features[p] = feat
-            poi_valid[p] = valid
-            poi_raw[p] = {
-                **raw_meta[p],
-                "shrunk": shrunk.tolist(),
-                "reliability": reliability,
-                "valid": valid,
-                "prior_level": "global",
-            }
-        else:
-            feat = _channels(global_prior, np.zeros_like(global_prior), reliability, 0.0, median, iqr, clip=float(cfg["clip"]))
-            poi_features[p] = feat
-            poi_valid[p] = 0.0
-            poi_raw[p] = {
-                "n_total": int(n),
-                "n_positive": int(n_pos),
-                "n_negative": int(n - n_pos),
-                "reliability": reliability,
-                "valid": 0.0,
-                "prior_level": "global_or_unknown",
-            }
-
+    raw_atoms, ses, raw_meta = _estimate_raw_atoms(
+        target_poi_ids, states, eligible, pairs, triples, estimator_cfg, int(cfg["n_bootstrap"])
+    )
+    global_prior, median, iqr = _global_atom_stats(raw_atoms, len(feature_names))
+    poi_features, poi_valid, poi_raw = _pack_poi_profiles(
+        catalog_poi_ids,
+        pos_counts,
+        raw_atoms,
+        ses,
+        raw_meta,
+        global_prior,
+        median,
+        iqr,
+        kappa=float(cfg["kappa"]),
+        min_positive=int(cfg["min_positive"]),
+        clip=float(cfg["clip"]),
+        n_total=n,
+    )
     return ProfileArtifacts(
         poi_features=poi_features,
         poi_valid=poi_valid,
@@ -364,6 +412,37 @@ def estimate_profiles_for_rows(
     )
 
 
+def _assign_block_fold_ids(
+    n: int,
+    n_folds: int,
+    timestamps: np.ndarray | None,
+) -> np.ndarray:
+    """Contiguous time-block (or index-block) fold ids in 0..n_folds-1."""
+    order = np.argsort(timestamps) if timestamps is not None else np.arange(n)
+    fold_id = np.full(n, -1, dtype=np.int64)
+    block = int(np.ceil(n / n_folds))
+    for i, idx in enumerate(order):
+        fold_id[idx] = min(n_folds - 1, i // block)
+    return fold_id
+
+
+def _fold_train_mask(
+    fold_id: np.ndarray,
+    k: int,
+    n: int,
+    n_folds: int,
+    *,
+    temporal: bool,
+) -> np.ndarray:
+    """Rows used to estimate fold-k profiles (forward-chaining or LOFO)."""
+    if temporal:
+        train_mask = fold_id < k
+        if train_mask.sum() < max(20, n // (n_folds * 2)):
+            return fold_id != k
+        return train_mask
+    return fold_id != k
+
+
 def crossfit_profiles(
     example_poi_targets: np.ndarray,
     source_state_matrix: dict[str, np.ndarray],
@@ -374,55 +453,28 @@ def crossfit_profiles(
 ) -> tuple[ProfileArtifacts, list[ProfileArtifacts], np.ndarray]:
     """Forward-chaining / block cross-fit profiles for training rows.
 
-    作用 / Role:
-      被 ``prepare_artifacts`` 调用。对 catalog 中每个 POI p，在给定行集合上估计
-      Y_p 相对 Q1–Q4 的 SURD 原子（经 ``estimate_profiles_for_rows`` → ``estimate_surd``）。
-      训练用折外表防泄漏；val/test 用 full 表。
-
-    输入 / Inputs:
-      example_poi_targets: [N] 每条 train example 的 target 模型 POI id（北京 N≈400）
-      source_state_matrix: {"Q1".."Q4"} → [N] 离散状态
-      catalog_poi_ids: 要建 profile 的 POI 列表（北京≈498）
-      timestamps: 若给定，按时间切块做前向交叉拟合
-
-    返回 / Returns:
-      - full_train_profiles: 用全部 train 估的表 → val/test 候选查找
-      - fold_profiles: 长度 n_folds；第 k 折不含（或不晚于）折 k 的标签
-      - fold_id: np.int64, shape (N,)（北京 smoke N=400），取值 0..n_folds-1
-
-    北京 smoke 输入形状提醒: targets/Q* 均为 (400,) int64；catalog list 长 498。
+    Returns (full_train_profiles, fold_profiles, fold_id).
     """
     n = len(example_poi_targets)
-    if timestamps is not None:
-        order = np.argsort(timestamps)
-    else:
-        order = np.arange(n)
-    fold_id = np.full(n, -1, dtype=np.int64)
-    # Contiguous time blocks.
-    block = int(np.ceil(n / n_folds))
-    for i, idx in enumerate(order):
-        fold_id[idx] = min(n_folds - 1, i // block)
+    fold_id = _assign_block_fold_ids(n, n_folds, timestamps)
+    temporal = timestamps is not None
 
     fold_profiles: list[ProfileArtifacts] = []
     for k in range(n_folds):
-        # Prefer strictly earlier folds when timestamps provided; else leave-one-fold-out.
-        if timestamps is not None:
-            train_mask = fold_id < k
-            if train_mask.sum() < max(20, n // (n_folds * 2)):
-                train_mask = fold_id != k
-        else:
-            train_mask = fold_id != k
+        train_mask = _fold_train_mask(fold_id, k, n, n_folds, temporal=temporal)
         sub_targets = example_poi_targets[train_mask]
         sub_states = {name: arr[train_mask] for name, arr in source_state_matrix.items()}
         fold_profiles.append(
             estimate_profiles_for_rows(sub_targets, sub_states, catalog_poi_ids, config=config)
         )
 
-    full = estimate_profiles_for_rows(example_poi_targets, source_state_matrix, catalog_poi_ids, config=config)
+    full = estimate_profiles_for_rows(
+        example_poi_targets, source_state_matrix, catalog_poi_ids, config=config
+    )
     return full, fold_profiles, fold_id
 
 
 def source_transform_hash(discretizer_cfg: dict) -> str:
-    """离散化配置指纹 / Short hash of discretizer config for cache/provenance keys."""
+    """Short hash of discretizer config for cache/provenance keys."""
     blob = json.dumps(discretizer_cfg, sort_keys=True).encode()
     return hashlib.sha256(blob).hexdigest()[:16]
