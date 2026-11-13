@@ -1,0 +1,3 @@
+# Isolates the STH-style user/transition head (no SURD experts in the score).
+model:
+  ablation: personalization_only
