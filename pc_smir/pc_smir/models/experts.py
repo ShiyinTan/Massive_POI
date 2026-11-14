@@ -38,7 +38,6 @@ class InteractionExperts(nn.Module):
         self.use_bilinear = use_bilinear
         self.include_fallback = include_fallback
 
-        # Expert order: 4 singles + pairs + triples + optional fallback
         self.expert_names: list[str] = [f"U{i}" for i in range(4)]
         self.expert_names += [f"S{i}{j}" for i, j in self.pairs]
         self.expert_names += [f"T{i}{j}{k}" for i, j, k in self.triples]
@@ -53,47 +52,38 @@ class InteractionExperts(nn.Module):
         pair_in = 3 * d + (1 if use_bilinear else 0) + d + meta_dim + 2
         self.pair_heads = nn.ModuleList([_mlp(pair_in, d, dropout) for _ in self.pairs])
 
-        self.triple_P = nn.ModuleList([nn.ModuleList([nn.Linear(d, d, bias=False) for _ in range(3)]) for _ in self.triples])
+        self.triple_P = nn.ModuleList(
+            [nn.ModuleList([nn.Linear(d, d, bias=False) for _ in range(3)]) for _ in self.triples]
+        )
         trip_in = 3 * d + 3 * d + d + d + meta_dim
         self.triple_heads = nn.ModuleList([_mlp(trip_in, d, dropout) for _ in self.triples])
 
         if include_fallback:
             self.fallback = _mlp(d + meta_dim, d, dropout)
 
-    def forward(self, sources, cand_repr, cand_meta, source_mask):
-        """
-        sources: [B,M,d]
-        cand_repr: [B,C,d]
-        cand_meta: [B,C,F]
-        source_mask: [B,M]
-        returns logits [B,C,E], expert_mask [B,C,E]
-        """
-        bsz, n_cand, d = cand_repr.shape
-        logits = []
-        masks = []
-
-        # Broadcast sources to candidates: [B,C,M,d]
-        src = sources.unsqueeze(1).expand(-1, n_cand, -1, -1)
-        sm = source_mask.unsqueeze(1).expand(-1, n_cand, -1)
-
+    def _score_singles(self, src, cand_repr, cand_meta, sm):
+        logits, masks = [], []
         for i, head in enumerate(self.single_heads):
             hi = src[:, :, i, :]
-            inp = torch.cat([hi, cand_repr, cand_meta], dim=-1)
-            logits.append(head(inp).squeeze(-1))
+            logits.append(head(torch.cat([hi, cand_repr, cand_meta], dim=-1)).squeeze(-1))
             masks.append(sm[:, :, i])
+        return logits, masks
 
+    def _score_pairs(self, src, cand_repr, cand_meta, sm, bsz, n_cand, d):
+        logits, masks = [], []
         for p_idx, (i, j) in enumerate(self.pairs):
             hi, hj = src[:, :, i, :], src[:, :, j, :]
             parts = [hi, hj, hi * hj]
             if self.use_bilinear:
-                # Bilinear expects [*, d]; flatten B,C
                 bil = self.pair_W[p_idx](hi.reshape(-1, d), hj.reshape(-1, d)).reshape(bsz, n_cand, 1)
                 parts.append(bil)
             parts.extend([cand_repr, cand_meta, sm[:, :, i : i + 1], sm[:, :, j : j + 1]])
-            inp = torch.cat(parts, dim=-1)
-            logits.append(self.pair_heads[p_idx](inp).squeeze(-1))
+            logits.append(self.pair_heads[p_idx](torch.cat(parts, dim=-1)).squeeze(-1))
             masks.append(torch.minimum(sm[:, :, i], sm[:, :, j]))
+        return logits, masks
 
+    def _score_triples(self, src, cand_repr, cand_meta, sm):
+        logits, masks = [], []
         for t_idx, (i, j, k) in enumerate(self.triples):
             hi, hj, hk = src[:, :, i, :], src[:, :, j, :], src[:, :, k, :]
             Pi, Pj, Pk = self.triple_P[t_idx]
@@ -104,12 +94,30 @@ class InteractionExperts(nn.Module):
             )
             logits.append(self.triple_heads[t_idx](inp).squeeze(-1))
             masks.append(torch.minimum(torch.minimum(sm[:, :, i], sm[:, :, j]), sm[:, :, k]))
+        return logits, masks
+
+    def forward(self, sources, cand_repr, cand_meta, source_mask):
+        """
+        sources: [B,M,d]
+        cand_repr: [B,C,d]
+        cand_meta: [B,C,F]
+        source_mask: [B,M]
+        returns logits [B,C,E], expert_mask [B,C,E]
+        """
+        bsz, n_cand, d = cand_repr.shape
+        src = sources.unsqueeze(1).expand(-1, n_cand, -1, -1)
+        sm = source_mask.unsqueeze(1).expand(-1, n_cand, -1)
+
+        logits, masks = self._score_singles(src, cand_repr, cand_meta, sm)
+        p_logits, p_masks = self._score_pairs(src, cand_repr, cand_meta, sm, bsz, n_cand, d)
+        logits.extend(p_logits)
+        masks.extend(p_masks)
+        t_logits, t_masks = self._score_triples(src, cand_repr, cand_meta, sm)
+        logits.extend(t_logits)
+        masks.extend(t_masks)
 
         if self.include_fallback:
-            inp = torch.cat([cand_repr, cand_meta], dim=-1)
-            logits.append(self.fallback(inp).squeeze(-1))
+            logits.append(self.fallback(torch.cat([cand_repr, cand_meta], dim=-1)).squeeze(-1))
             masks.append(torch.ones(bsz, n_cand, device=cand_repr.device))
 
-        expert_logits = torch.stack(logits, dim=-1)  # [B,C,E]
-        expert_mask = torch.stack(masks, dim=-1)
-        return expert_logits, expert_mask
+        return torch.stack(logits, dim=-1), torch.stack(masks, dim=-1)
