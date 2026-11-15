@@ -1,9 +1,9 @@
 """Factory for configurable next-POI backbones.
 
-``model.backbone`` ∈ ``flashback | graph_flashback | sthgcn | sthgcn_seq``.
+``model.backbone`` ∈ ``flashback | graph_flashback``.
 
-- ``sthgcn`` — full Massive-STEPS hypergraph (PyG); use ``training/sthgcn_runner``.
-- ``sthgcn_seq`` — DEPRECATED local NextPOIBatch Transformer (not STHGCN).
+STHGCN is not integrated here — run the original Massive-STEPS package:
+``Massive-STEPS/Spatio-Temporal-Hypergraph-Model/``.
 """
 
 from __future__ import annotations
@@ -17,7 +17,7 @@ from .backbone_flashback import FlashbackBackbone
 from .backbone_graph_flashback import GraphFlashbackBackbone
 from .graph_builders import resolve_graph_flashback_graphs
 
-SUPPORTED_BACKBONES = ("flashback", "graph_flashback", "sthgcn", "sthgcn_seq")
+SUPPORTED_BACKBONES = ("flashback", "graph_flashback")
 
 
 def build_backbone(
@@ -40,13 +40,17 @@ def build_backbone(
     use_weight: bool = False,
     use_graph_user: bool = False,
     use_spatial_graph: bool = False,
-    sthgcn_num_layers: int = 2,
-    sthgcn_num_heads: int = 4,
-    sthgcn_ff_dim: Optional[int] = None,
-    upstream_sthgcn: Any = None,
     **_: Any,
 ):
+    del dropout  # Flashback / Graph-Flashback do not use this kwarg
     key = str(name).strip().lower()
+    if key in ("sthgcn", "sthgcn_seq"):
+        raise ValueError(
+            f"model.backbone={name!r} was removed from surd_guided_poi. "
+            "Run the original Massive-STEPS STHGCN at "
+            "Massive-STEPS/Spatio-Temporal-Hypergraph-Model/ "
+            f"(supported here: {SUPPORTED_BACKBONES})."
+        )
     if key not in SUPPORTED_BACKBONES:
         raise ValueError(
             f"Unknown model.backbone={name!r}; expected one of {SUPPORTED_BACKBONES}"
@@ -62,55 +66,27 @@ def build_backbone(
             lambda_s=lambda_s,
         )
 
-    if key == "graph_flashback":
-        if transition_graph is None or interact_graph is None:
-            transition_graph, interact_graph = resolve_graph_flashback_graphs(
-                num_pois=num_pois,
-                num_users=num_users,
-                train_samples=train_samples,
-                transition_pkl=transition_pkl,
-                interact_pkl=interact_pkl,
-            )
-        return GraphFlashbackBackbone(
+    # graph_flashback
+    if transition_graph is None or interact_graph is None:
+        transition_graph, interact_graph = resolve_graph_flashback_graphs(
             num_pois=num_pois,
             num_users=num_users,
-            transition_graph=transition_graph,
-            interact_graph=interact_graph,
-            hidden_dim=hidden_dim,
-            rnn_type=rnn_type,
-            lambda_t=lambda_t,
-            lambda_s=lambda_s,
-            lambda_loc=lambda_loc,
-            lambda_user=lambda_user,
-            use_weight=use_weight,
-            use_graph_user=use_graph_user,
-            use_spatial_graph=use_spatial_graph,
+            train_samples=train_samples,
+            transition_pkl=transition_pkl,
+            interact_pkl=interact_pkl,
         )
-
-    if key == "sthgcn":
-        # Full hypergraph — constructed in sthgcn_runner via prepare_sthgcn_pipeline.
-        from ..data.sthgcn_hypergraph import require_sthgcn_deps
-        from .backbone_sthgcn import HypergraphSTHGCNBackbone
-
-        require_sthgcn_deps()
-        if upstream_sthgcn is None:
-            raise ValueError(
-                "model.backbone=sthgcn is the full hypergraph path and cannot be "
-                "built from NextPOIBatch alone. Use scripts/train.py (auto-routes) "
-                "or training.sthgcn_runner.run_sthgcn_baseline. "
-                "Deprecated local Transformer: backbone=sthgcn_seq."
-            )
-        return HypergraphSTHGCNBackbone(upstream_sthgcn)
-
-    # Deprecated local seq adapter
-    from .backbone_sthgcn_seq import STHGCNSeqBackbone
-
-    return STHGCNSeqBackbone(
+    return GraphFlashbackBackbone(
         num_pois=num_pois,
         num_users=num_users,
+        transition_graph=transition_graph,
+        interact_graph=interact_graph,
         hidden_dim=hidden_dim,
-        num_layers=int(sthgcn_num_layers),
-        num_heads=int(sthgcn_num_heads),
-        ff_dim=int(sthgcn_ff_dim if sthgcn_ff_dim is not None else max(128, 2 * hidden_dim)),
-        dropout=dropout,
+        rnn_type=rnn_type,
+        lambda_t=lambda_t,
+        lambda_s=lambda_s,
+        lambda_loc=lambda_loc,
+        lambda_user=lambda_user,
+        use_weight=use_weight,
+        use_graph_user=use_graph_user,
+        use_spatial_graph=use_spatial_graph,
     )

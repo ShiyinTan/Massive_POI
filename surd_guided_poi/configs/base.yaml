@@ -26,7 +26,8 @@ data:
   setting: transductive
 
 model:
-  # flashback | graph_flashback | sthgcn (full hypergraph) | sthgcn_seq (deprecated)
+  # flashback | graph_flashback
+  # (STHGCN: run Massive-STEPS/Spatio-Temporal-Hypergraph-Model directly)
   backbone: flashback
   hidden_dim: 64
   poi_emb_dim: 64  # ignored when share_poi_embedding=true (backbone emb dim = hidden_dim)
@@ -46,10 +47,6 @@ model:
   use_weight: false
   use_graph_user: false
   use_spatial_graph: false
-  # STHGCN sequential Transformer (NextPOIBatch adapter; full hypergraph needs PyG)
-  sthgcn_num_layers: 2
-  sthgcn_num_heads: 4
-  # sthgcn_ff_dim: null  # default max(128, 2*hidden_dim)
 
 train:
   batch_size: 64
@@ -86,7 +83,7 @@ eval:
   # Massive-STEPS Flashback Acc@1 协议：val/test 只评每条 trail 的最后一站
   # （train 仍可用 data.use_all_prefixes=true）。Acc@1 ≡ recall@1。
   use_all_prefixes: false
-  # STHGCN remove_unseen_user_poi: drop val/test if user or target POI not in train.
-  # Flashback / Graph-Flashback keep false. If unset: backbone=sthgcn -> true.
+  # Optional cold filter: drop val/test if user or target POI not in train.
+  # Flashback / Graph-Flashback keep false (Massive-STEPS Acc protocol).
   drop_unseen_user_poi: false
   best_metric: recall@1

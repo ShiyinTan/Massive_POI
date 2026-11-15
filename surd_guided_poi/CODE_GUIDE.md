@@ -3,8 +3,9 @@
 这份指南面向**不一定熟悉深度机器学习**的读者，说明本目录如何：
 
 1. **对齐 Massive-STEPS 官方数据 / 切分 / 预处理约定**  
-2. **用可切换的 Massive-STEPS 推荐骨干**（`flashback` / `graph_flashback` / `sthgcn`）  
-3. **在骨干之上挂 SURD 指导训练层**
+2. **用可切换的 Massive-STEPS 推荐骨干**（`flashback` / `graph_flashback`）  
+3. **在骨干之上挂 SURD 指导训练层**  
+   （STHGCN 请直接跑 `Massive-STEPS/Spatio-Temporal-Hypergraph-Model/`，本目录不封装。）
 
 完整数学规格：[`docs/SURD_Guided_Next_POI_Recommendation_Implementation_Spec.md`](docs/SURD_Guided_Next_POI_Recommendation_Implementation_Spec.md)
 
@@ -18,7 +19,7 @@
 |------|------------------|------------------|
 | 数据切分 | 自定义按时间戳全局切 train/val/test | **Massive-STEPS 官方** `{city}_checkins_{train,validation,test}.csv`（trail 级、按 user 分层，与 Flashback/GETNext 相同） |
 | 加载方式 | 自写单 CSV adapter | `data/massive_steps.py` 解析本地 / `Massive-STEPS/data/` / HuggingFace；坐标缺失时用城市中心填充（同 Flashback） |
-| 推荐骨干 | 自研 History/Time/Space + concat MLP | **可配置** `model.backbone`：Flashback / Graph-Flashback / STHGCN-seq |
+| 推荐骨干 | 自研 History/Time/Space + concat MLP | **可配置** `model.backbone`：Flashback / Graph-Flashback |
 | SURD | 挂在自研 encoder 上 | 仍用 Q1/Q2/Q3 子集头估 Specific MI / SURD；**推荐 logits 来自所选骨干**；Q1 可共享骨干 POI embedding |
 
 ---
@@ -29,7 +30,7 @@
 surd_guided_poi/
 ├── CODE_GUIDE.md / README.md
 ├── docs/          ← 实现规格
-├── configs/       ← 城市与 backbone/SURD 超参（含 model_graph_flashback / model_sthgcn）
+├── configs/       ← 城市与 backbone/SURD 超参（含 model_graph_flashback）
 ├── data/
 │   ├── massive_steps.py   ← 官方 split 路径 / HF 下载 / Flashback·Graph-Flashback 路径入口
 │   ├── preprocessing.py   ← 在官方 split 内构造 next-POI 样本
@@ -39,7 +40,6 @@ surd_guided_poi/
 │   ├── backbone_factory.py         ← model.backbone 工厂
 │   ├── backbone_flashback.py       ← Massive-STEPS/Flashback
 │   ├── backbone_graph_flashback.py ← Massive-STEPS/Graph-Flashback
-│   ├── backbone_sthgcn.py          ← STHGCN 序列 Transformer 适配
 │   ├── graph_builders.py           ← 计数转移图 / 用户–POI 交互图
 │   ├── full_model.py               ← 骨干推荐 + SURD 子集头
 │   ├── encoders.py                 ← Q1/Q2/Q3（给 SURD，不是主推荐头）
@@ -83,12 +83,10 @@ CSV 搜索顺序：`data.data_dir` → `Massive-STEPS/data/{city}/` → HF 缓�
 |------------------|----------|--------|
 | `flashback` | `Massive-STEPS/Flashback/` | `models/backbone_flashback.py` |
 | `graph_flashback` | `Massive-STEPS/Graph-Flashback/` | `models/backbone_graph_flashback.py`（`import_graph_flashback_network()` 避免与 Flashback 的 `network.py` 冲突） |
-| `sthgcn` | **完整超图** `Spatio-Temporal-Hypergraph-Model`（PyG） | `data/sthgcn_hypergraph.py` + `training/sthgcn_runner.py` |
-| `sthgcn_seq` | **已弃用** 本地 Transformer（勿当 baseline） | `models/backbone_sthgcn_seq.py` |
 
 Flashback：先 `add_flashback_dir_to_sys_path()`，再 `from network import Flashback`。  
 Graph-Flashback：可选 `model.transition_pkl` / `model.interact_pkl`；缺省时用 official-train 样本计数构图（`graph_builders.py`）。  
-STHGCN：`backbone=sthgcn` 走完整超图（`docs/STHGCN.md`，需 `requirements-sthgcn.txt`）。`sthgcn_seq` 已弃用。
+STHGCN：本目录不封装；请直接跑 `Massive-STEPS/Spatio-Temporal-Hypergraph-Model/`。
 
 ### 3.2 预处理约定（对齐 Flashback）
 
@@ -130,10 +128,10 @@ STHGCN：`backbone=sthgcn` 走完整超图（`docs/STHGCN.md`，需 `requirement
 
 ```yaml
 model:
-  backbone: flashback   # 或 graph_flashback / sthgcn
+  backbone: flashback   # 或 graph_flashback
 ```
 
-预制覆盖：`configs/model_flashback_aligned.yaml`、`model_graph_flashback.yaml`、`model_sthgcn.yaml`。
+预制覆盖：`configs/model_flashback_aligned.yaml`、`model_graph_flashback.yaml`。
 
 统一接口：各适配器 `forward(batch) → (last_logits [B,K], seq_logits, h_next)`；`full_model` / train / eval 只吃 `last_logits`。工厂：`models/backbone_factory.py`。
 
@@ -141,8 +139,6 @@ model:
 |------|----------|
 | `flashback` | 官方 Flashback RNN + 时空衰减 |
 | `graph_flashback` | 官方 Graph-Flashback（转移图 GCN + 用户–POI 交互）；无 pkl 则用 train 计数图 |
-| `sthgcn` | 完整超图 NeighborSampler + `STHGCN`（PyG；SURD 暂不支持） |
-| `sthgcn_seq` | 已弃用本地序列 Transformer |
 
 推理路径：`SURDGuidedPOIModel.recommend` → **只走所选骨干**，不查真实标签权重。
 
@@ -157,7 +153,7 @@ model:
 ```text
 Massive-STEPS official batch
         │
-        ├──────────────────────────────► backbone (flashback|graph_flashback|sthgcn)
+        ├──────────────────────────────► backbone (flashback|graph_flashback)
         │                                         └──► rec_logits  (= L_rec)
         ├─ Q1 HistoryEncoder (可共享骨干 POI emb)
         ├─ Q2 TemporalEncoder (历史时间序列 + 目标时刻 → 融合)
@@ -187,7 +183,7 @@ Massive-STEPS official batch
 
 **只跑骨干、对齐 Massive-STEPS Acc（SURD 关）** → 详见 [`docs/BASELINE_ONLY.md`](docs/BASELINE_ONLY.md)。
 
-要点：Flashback/GF 不丢冷用户/POI；STHGCN `drop_unseen_user_poi: true`；评测 last-only；Graph-Flashback 对齐 0.304 需 KGE pkl。
+要点：Flashback/GF 不丢冷用户/POI；评测 last-only；Graph-Flashback 对齐 0.304 需 KGE pkl。
 
 ```bash
 cd surd_guided_poi
@@ -236,11 +232,11 @@ beijing_checkins_test.csv
 **已对齐 / 已实现**
 
 - Massive-STEPS 官方 split + Flashback 坐标/轨迹约定  
-- 可切换骨干：`flashback` / `graph_flashback` / `sthgcn`（序列适配）+ SURD U/S 指导  
-- Baseline-only：SURD 关、last-only eval、STHGCN 冷用户/冷 POI 过滤（`docs/BASELINE_ONLY.md`）  
+- 可切换骨干：`flashback` / `graph_flashback` + SURD U/S 指导  
+- Baseline-only：SURD 关、last-only eval（`docs/BASELINE_ONLY.md`）  
 - 中文指南与规格入库  
 
 **仍延后**
 
-- GETNext；SURD 挂在完整超图 STHGCN 上  
+- GETNext  
 - Q4 进入 SURD、candidate-conditioned 推理、R 正则、大规模消融、inductive cold-start  

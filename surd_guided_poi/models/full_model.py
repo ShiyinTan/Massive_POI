@@ -23,7 +23,7 @@ from .subset_estimators import SOURCE_NAMES, SubsetEstimators
 class SURDGuidedPOIModel(nn.Module):
     """可切换推荐骨干 + SURD 侧路（Q1/Q2/Q3 + 7 子集头）。
 
-    ``model.backbone`` ∈ flashback | graph_flashback | sthgcn。
+    ``model.backbone`` ∈ flashback | graph_flashback。
 
     记号：B=batch，L=历史长，K=num_pois，d=hidden_dim。
 
@@ -184,9 +184,5 @@ def build_surd_model(
         "use_weight": bool(model_cfg.get("use_weight", False)),
         "use_graph_user": bool(model_cfg.get("use_graph_user", False)),
         "use_spatial_graph": bool(model_cfg.get("use_spatial_graph", False)),
-        # STHGCN seq extras
-        "sthgcn_num_layers": int(model_cfg.get("sthgcn_num_layers", 2)),
-        "sthgcn_num_heads": int(model_cfg.get("sthgcn_num_heads", 4)),
-        "sthgcn_ff_dim": model_cfg.get("sthgcn_ff_dim"),
     }
     return SURDGuidedPOIModel(**kwargs)
