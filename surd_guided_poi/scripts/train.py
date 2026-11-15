@@ -32,6 +32,7 @@ from surd_guided_poi.models.full_model import SURDGuidedPOIModel
 from surd_guided_poi.training.alternating import AlternatingSURDTrainer
 from surd_guided_poi.training.checkpoint import load_checkpoint, write_json
 from surd_guided_poi.training.config import load_config
+from surd_guided_poi.training.log_format import format_metrics, log_block
 
 
 def set_seed(seed: int) -> None:
@@ -178,11 +179,16 @@ def main():
         },
     )
     print(
-        f"city={city} POIs={vocab.num_pois} users={vocab.num_users} "
-        f"train={len(model_train)} est={len(estimation)} "
-        f"val={len(val_samples)} test={len(test_samples)}"
+        log_block(
+            f"data  {city}",
+            [
+                f"POIs={vocab.num_pois}  users={vocab.num_users}",
+                f"train={len(model_train)}  est={len(estimation)}  "
+                f"val={len(val_samples)}  test={len(test_samples)}",
+                f"device={device}",
+            ],
+        )
     )
-    print("split files:", {k: str(v) for k, v in split_paths.items()})
 
     loaders = build_loaders(
         {
@@ -215,8 +221,12 @@ def main():
         load_checkpoint(best_path, model, map_location=device)
     test_metrics = evaluate_ranking(model, loaders["test"], device, ks=cfg["eval"]["ks"])
     write_json(output_dir / "test_metrics.json", test_metrics)
-    print("TEST:", test_metrics)
-    print("Done. Outputs in", output_dir)
+    print(
+        log_block(
+            "TEST",
+            [format_metrics(test_metrics), f"outputs → {output_dir}"],
+        )
+    )
 
 
 if __name__ == "__main__":

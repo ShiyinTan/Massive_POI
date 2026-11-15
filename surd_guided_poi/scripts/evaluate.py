@@ -66,13 +66,21 @@ def main():
     parser.add_argument("--checkpoint", required=True)
     parser.add_argument("--data_dir", default=None)
     parser.add_argument("--output_json", default="outputs/eval_metrics.json")
+    parser.add_argument(
+        "--device",
+        default=None,
+        help="Torch device string, e.g. cuda / cuda:0 / cpu (default: config or auto)",
+    )
     args = parser.parse_args()
 
     cfg = load_config(_config_paths(args.config))
     if args.data_dir:
         cfg["data"]["data_dir"] = args.data_dir
+    if args.device:
+        cfg["device"] = args.device
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    # Same resolution as train.py: CLI > config > auto cuda/cpu
+    device = torch.device(cfg.get("device") or ("cuda" if torch.cuda.is_available() else "cpu"))
     data_cfg = cfg["data"]
     city = data_cfg["city"]
     cache_dir = PKG_ROOT / data_cfg.get("cache_dir", "outputs/data_cache") / city
@@ -112,12 +120,19 @@ def main():
     buckets = frequency_buckets(train_counts, cutoffs=cfg["eval"]["frequency_buckets"])
     long_tail = evaluate_by_frequency(logits, targets, buckets["poi_bucket"], ks=cfg["eval"]["ks"])
 
-    result = {"ranking": metrics, "long_tail": long_tail, "split_protocol": "massive_steps_official"}
+    result = {
+        "ranking": metrics,
+        "long_tail": long_tail,
+        "split_protocol": "massive_steps_official",
+        "device": str(device),
+    }
     out = Path(args.output_json)
     if not out.is_absolute():
         out = PKG_ROOT / out
     write_json(out, result)
-    print(result)
+    print(f"device={device}")
+    print("ranking:", metrics)
+    print("wrote", out)
 
 
 if __name__ == "__main__":

@@ -26,6 +26,13 @@ from ..losses.recommendation_loss import recommendation_loss
 from ..losses.surd_auxiliary_loss import synergy_auxiliary_loss, unique_auxiliary_loss
 from ..models.subset_estimators import SOURCE_NAMES, SUBSET_NAMES, subset_key
 from .checkpoint import save_checkpoint, write_json
+from .log_format import (
+    epoch_title,
+    format_global_u,
+    format_metrics,
+    format_train_losses,
+    log_block,
+)
 
 
 class AlternatingSURDTrainer:
@@ -94,7 +101,11 @@ class AlternatingSURDTrainer:
                 p.requires_grad_(False)  # warm-up 不训 SURD 头
             total = 0.0
             n = 0
-            for batch in tqdm(self.train_loader, desc=f"warmup {epoch+1}/{epochs}", leave=False):
+            for batch in tqdm(
+                self.train_loader,
+                desc=epoch_title("warmup", epoch + 1, epochs),
+                leave=False,
+            ):
                 batch = batch.to(self.device)
                 out = self.model(batch, compute_subsets=False)
                 loss = recommendation_loss(out["rec_logits"], batch.target_poi_id)
@@ -109,7 +120,15 @@ class AlternatingSURDTrainer:
             metrics = evaluate_ranking(
                 self.model, self.val_loader, self.device, ks=self.config["eval"]["ks"]
             )
-            print(f"[warmup {epoch+1}] loss={total/max(n,1):.4f} val={metrics}")
+            print(
+                log_block(
+                    epoch_title("warmup", epoch + 1, epochs),
+                    [
+                        f"train  loss={total / max(n, 1):.4f}",
+                        f"val    {format_metrics(metrics)}",
+                    ],
+                )
+            )
 
     def fit_subset_estimators(self) -> None:
         """Phase A part 1: fine-tune subset heads with encoders optionally frozen."""
@@ -140,7 +159,10 @@ class AlternatingSURDTrainer:
                 opt.step()
                 total += float(loss.item())
                 n += 1
-            print(f"[subset-fit {epoch+1}/{epochs}] loss={total/max(n,1):.4f}")
+            print(
+                f"  subset-fit  {epoch + 1:02d}/{epochs:02d}  "
+                f"loss={total / max(n, 1):.4f}"
+            )
         for p in self._rec_parameters():
             p.requires_grad_(True)
         for p in self._subset_parameters():
@@ -179,8 +201,13 @@ class AlternatingSURDTrainer:
         )
         self._dump_surd_artifacts(tag, specific_mi, counts, poi_surd, global_surd, calib)
         print(
-            f"[SURD {tag}] fallback_frac={self.weights['fallback_fraction']:.3f} "
-            f"global_U={global_surd['unique']}"
+            log_block(
+                f"SURD  {tag}",
+                [
+                    f"fallback_frac  {self.weights['fallback_fraction']:.3f}",
+                    f"global_U       {format_global_u(global_surd['unique'])}",
+                ],
+            )
         )
         return self.weights
 
@@ -244,7 +271,11 @@ class AlternatingSURDTrainer:
         lambda_s = float(self.config["train"]["lambda_s"])
         totals = {"loss": 0.0, "rec": 0.0, "u": 0.0, "s": 0.0}
         n = 0
-        for batch in tqdm(self.train_loader, desc=f"epoch {epoch}", leave=False):
+        for batch in tqdm(
+            self.train_loader,
+            desc=epoch_title("epoch", epoch, int(self.config["train"]["total_epochs"])),
+            leave=False,
+        ):
             batch = batch.to(self.device)
             out = self.model(batch, compute_subsets=True)
             loss_rec = recommendation_loss(out["rec_logits"], batch.target_poi_id)
@@ -279,11 +310,22 @@ class AlternatingSURDTrainer:
 
     def fit(self) -> Dict[str, Any]:
         # 流程：warm-up → 首次估 SURD → 循环（训推荐；每隔几轮再估 SURD）
+        total_epochs = int(self.config["train"]["total_epochs"])
+        refresh_every = int(self.config["train"]["surd_refresh_interval"])
+        print(
+            log_block(
+                "train schedule",
+                [
+                    f"warmup_epochs={self.config['train']['warmup_epochs']}  "
+                    f"total_epochs={total_epochs}  "
+                    f"surd_refresh_every={refresh_every}  "
+                    f"subset_fit_epochs={self.config['train']['subset_fit_epochs']}",
+                ],
+            )
+        )
         self.warmup()
         self.refresh_surd(tag="epoch_0000_init")
 
-        total_epochs = int(self.config["train"]["total_epochs"])
-        refresh_every = int(self.config["train"]["surd_refresh_interval"])
         for epoch in range(1, total_epochs + 1):
             train_stats = self.train_recommendation_epoch(epoch)
             val_metrics = evaluate_ranking(
@@ -291,10 +333,18 @@ class AlternatingSURDTrainer:
             )
             record = {"epoch": epoch, "train": train_stats, "val": val_metrics}
             self.history.append(record)
-            print(f"[epoch {epoch}] train={train_stats} val={val_metrics}")
 
             score = val_metrics.get("recall@5", val_metrics.get("recall@1", 0.0))
-            if score >= self.best_val:
+            is_best = score >= self.best_val
+            lines = [
+                f"train  {format_train_losses(train_stats)}",
+                f"val    {format_metrics(val_metrics)}",
+            ]
+            if is_best:
+                lines.append(f"★ new best  R@5={float(score):.4f}")
+            print(log_block(epoch_title("epoch", epoch, total_epochs), lines))
+
+            if is_best:
                 self.best_val = score
                 save_checkpoint(
                     self.output_dir / "best.pt",
@@ -314,4 +364,10 @@ class AlternatingSURDTrainer:
             meta={"history": self.history, "best_val": self.best_val},
         )
         write_json(self.output_dir / "history.json", self.history)
+        print(
+            log_block(
+                "training finished",
+                [f"best_val_R@5={float(self.best_val):.4f}  output={self.output_dir}"],
+            )
+        )
         return {"best_val": self.best_val, "history": self.history}

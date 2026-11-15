@@ -42,16 +42,16 @@ train:
   num_workers: 0
   lr: 0.001
   weight_decay: 0.00001
-  warmup_epochs: 2
-  total_epochs: 10
-  surd_refresh_interval: 3
+  warmup_epochs: 5
+  total_epochs: 40
+  surd_refresh_interval: 5
   lambda_u: 0.5
   lambda_s: 0.5
   ema_beta: 0.5
   grad_clip: 5.0
-  subset_fit_epochs: 3
+  subset_fit_epochs: 5
   subset_fit_lr: 0.001
-  log_every: 20
+  log_every: 50
 
 surd:
   eps: 1.0e-12
