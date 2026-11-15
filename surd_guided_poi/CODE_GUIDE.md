@@ -98,7 +98,7 @@ CSV 搜索顺序：`data.data_dir` → `Massive-STEPS/data/{city}/` → HF 缓�
 - Transductive 只影响「词表里有没有这个 POI id」，不把别的 split 的打卡塞进序列。
 
 **关于「序列长度 < 20」：** 本目录默认路径 **不会** 按用户总打卡数 <20 过滤。  
-`configs/base.yaml` 里的 `max_history_len: 20` 只是把每条样本的 **history 截断到最近 20 步**；`min_history_len: 1` 只要求每条 trail 至少能切出「1 个历史 + 1 个目标」。  
+`configs/base.yaml` 里的 `max_history_len: 50` 只是把每条样本的 **history 截断到最近 50 步**（比上游 Flashback CLI 默认 `sequence_length=20` 更长，仍 Flashback-friendly）；`min_history_len: 1` 只要求每条 trail 至少能切出「1 个历史 + 1 个目标」。  
 上游 Flashback CLI（`Massive-STEPS/Flashback/setting.py`）会设 `sequence_length=20` 且 `min_checkins=sequence_length+1`，那是他们自己的训练入口；我们的 `train.py` 走的是 `load_official_split_frames`，可选 helper `load_flashback_poi_dataloader(..., min_checkins=0)` 默认也不开该过滤。
 
 ### 3.3 SURD 估计用的 holdout
