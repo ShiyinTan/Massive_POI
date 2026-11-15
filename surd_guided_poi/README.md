@@ -2,9 +2,12 @@
 
 First-version pipeline that **reuses Massive-STEPS official data splits** and
 configurable recommendation backbones from Massive-STEPS
-(`flashback` | `graph_flashback` | `sthgcn`), then wraps **POI-specific Specific MI
+(`flashback` | `graph_flashback`), then wraps **POI-specific Specific MI
 + SURD guidance weights** for auxiliary training (predictive information structure
 on observational data — not causal claims).
+
+For **STHGCN**, run the original Massive-STEPS package:
+`Massive-STEPS/Spatio-Temporal-Hypergraph-Model/` (not wrapped here).
 
 - Beginner Chinese walkthrough: [`CODE_GUIDE.md`](CODE_GUIDE.md)
 - Spec: [`docs/SURD_Guided_Next_POI_Recommendation_Implementation_Spec.md`](docs/SURD_Guided_Next_POI_Recommendation_Implementation_Spec.md)
@@ -16,7 +19,7 @@ on observational data — not causal claims).
 | Split files | `{city}_checkins_{train,validation,test}.csv` (same as Flashback / GETNext) |
 | Split construction | `Massive-STEPS/src/create_next_poi_dataset.py` (trail-level, user-stratified) |
 | Coord fallback | Missing venue lat/lon ← city center (`Flashback/dataloader.py`) |
-| Recommendation backbones | `model.backbone`: `flashback` → `Massive-STEPS/Flashback`; `graph_flashback` → `Massive-STEPS/Graph-Flashback`; `sthgcn` → **full hypergraph** STHGCN (PyG; see `docs/STHGCN.md` / `requirements-sthgcn.txt`). Deprecated: `sthgcn_seq` local Transformer |
+| Recommendation backbones | `model.backbone`: `flashback` → `Massive-STEPS/Flashback`; `graph_flashback` → `Massive-STEPS/Graph-Flashback` |
 
 ## Quick start
 
@@ -36,16 +39,11 @@ python scripts/train.py \
 python scripts/train.py \
   --config configs/base.yaml configs/dataset_beijing.yaml configs/model_graph_flashback.yaml \
   --data_dir /path/to/Beijing
-# Full hypergraph STHGCN (install requirements-sthgcn.txt first)
-python scripts/train.py \
-  --config configs/base.yaml configs/dataset_beijing.yaml configs/model_sthgcn.yaml \
-  --data_dir /path/to/Beijing
 
 python scripts/evaluate.py --checkpoint outputs/beijing/best.pt --data_dir /path/to/Beijing
 ```
 
-Baseline Acc protocol: [`docs/BASELINE_ONLY.md`](docs/BASELINE_ONLY.md).  
-Full STHGCN deps / NeighborSampler path: [`docs/STHGCN.md`](docs/STHGCN.md).
+Baseline Acc protocol: [`docs/BASELINE_ONLY.md`](docs/BASELINE_ONLY.md).
 
 Tests (repo root):
 
@@ -58,7 +56,7 @@ python -m pytest surd_guided_poi/tests -q
 | Item | Choice |
 |------|--------|
 | Data | Massive-STEPS official train/val/test CSVs |
-| Backbone | `flashback` / `graph_flashback` → `NextPOIBatch` logits; `sthgcn` → hypergraph NeighborSampler path |
+| Backbone | `flashback` / `graph_flashback` → `NextPOIBatch` logits |
 | SURD sources | Q1 history / Q2 time / Q3 spatial side encoders |
 | SURD role | Detached U/S weights for auxiliary CE; no backprop through SURD |
 | Inference | Selected backbone only (no SURD lookup) |

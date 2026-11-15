@@ -1,4 +1,4 @@
-"""STHGCN-style cold user/POI filter."""
+"""Optional cold user/POI filter."""
 
 from __future__ import annotations
 

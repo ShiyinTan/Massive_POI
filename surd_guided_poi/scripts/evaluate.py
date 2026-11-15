@@ -40,7 +40,7 @@ def drop_unseen_user_poi_enabled(cfg: dict) -> bool:
         return bool(eval_cfg["drop_unseen_user_poi"])
     if "drop_unseen_user_poi" in data_cfg:
         return bool(data_cfg["drop_unseen_user_poi"])
-    return str(cfg.get("model", {}).get("backbone", "flashback")).lower() == "sthgcn"
+    return False
 
 
 def _config_paths(args_config: list[str]) -> list[Path]:
@@ -84,46 +84,6 @@ def main():
 
     # Same resolution as train.py: CLI > config > auto cuda/cpu
     device = torch.device(cfg.get("device") or ("cuda" if torch.cuda.is_available() else "cpu"))
-    backbone = str(cfg.get("model", {}).get("backbone", "flashback")).lower()
-    if backbone == "sthgcn":
-        from surd_guided_poi.data.sthgcn_hypergraph import prepare_sthgcn_pipeline
-        from surd_guided_poi.training.sthgcn_runner import evaluate_sampler
-
-        data_cfg = cfg["data"]
-        city = data_cfg["city"]
-        cache_dir = PKG_ROOT / data_cfg.get("cache_dir", "outputs/data_cache") / city
-        model_cfg = cfg.get("model") or {}
-        conf_relpath = str(model_cfg.get("sthgcn_conf", "std_conf/beijing.yml"))
-        sthgcn_cfg, model, _, _, sampler_test = prepare_sthgcn_pipeline(
-            city=city,
-            data_dir=data_cfg.get("data_dir"),
-            cache_dir=cache_dir,
-            hf_dataset_id=data_cfg.get("hf_dataset_id"),
-            conf_relpath=conf_relpath,
-            device=str(device),
-        )
-        ckpt = torch.load(args.checkpoint, map_location=device, weights_only=False)
-        state = ckpt["model_state_dict"] if isinstance(ckpt, dict) and "model_state_dict" in ckpt else ckpt
-        model.load_state_dict(state)
-        model = model.to(device)
-        ks = tuple(cfg.get("eval", {}).get("ks") or [1, 5, 10])
-        metrics = evaluate_sampler(model, sampler_test, device, ks=ks, mode="test")
-        result = {
-            "ranking": metrics,
-            "backbone": "sthgcn",
-            "path": "full_hypergraph",
-            "device": str(device),
-            "num_poi": int(sthgcn_cfg.dataset_args.num_poi),
-        }
-        out = Path(args.output_json)
-        if not out.is_absolute():
-            out = PKG_ROOT / out
-        write_json(out, result)
-        print(f"device={device}")
-        print("ranking:", metrics)
-        print("wrote", out)
-        return
-
     data_cfg = cfg["data"]
     city = data_cfg["city"]
     cache_dir = PKG_ROOT / data_cfg.get("cache_dir", "outputs/data_cache") / city

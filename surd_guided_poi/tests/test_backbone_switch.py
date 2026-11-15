@@ -1,4 +1,4 @@
-"""Smoke tests for model.backbone = flashback | graph_flashback | sthgcn*."""
+"""Smoke tests for model.backbone = flashback | graph_flashback."""
 
 from __future__ import annotations
 
@@ -64,10 +64,7 @@ def _toy_samples(num_pois=10, num_users=3, n=20):
 
 
 def test_supported_backbone_names():
-    assert "flashback" in SUPPORTED_BACKBONES
-    assert "graph_flashback" in SUPPORTED_BACKBONES
-    assert "sthgcn" in SUPPORTED_BACKBONES
-    assert "sthgcn_seq" in SUPPORTED_BACKBONES
+    assert SUPPORTED_BACKBONES == ("flashback", "graph_flashback")
 
 
 def test_graph_builders_shapes():
@@ -98,40 +95,13 @@ def test_graph_flashback_forward_and_backward():
     assert model.backbone.flashback.encoder.weight.grad is not None
 
 
-def test_sthgcn_full_rejects_nextpoi_factory_without_upstream():
-    with pytest.raises((ValueError, ImportError)):
+def test_sthgcn_backbone_removed():
+    with pytest.raises(ValueError, match="removed"):
         build_backbone("sthgcn", num_pois=10, num_users=3, hidden_dim=16)
-
-
-def test_deprecated_sthgcn_seq_still_runs():
-    model = SURDGuidedPOIModel(
-        num_pois=10,
-        num_users=3,
-        hidden_dim=16,
-        poi_emb_dim=16,
-        subset_hidden_dim=16,
-        backbone="sthgcn_seq",
-        sthgcn_num_layers=1,
-        sthgcn_num_heads=4,
-        share_poi_embedding=True,
-    )
-    batch = _fake_batch()
-    logits = model.recommend(batch)
-    assert logits.shape == (4, 10)
+    with pytest.raises(ValueError, match="removed"):
+        build_backbone("sthgcn_seq", num_pois=10, num_users=3, hidden_dim=16)
 
 
 def test_build_backbone_rejects_unknown():
     with pytest.raises(ValueError):
         build_backbone("getnext", num_pois=5, num_users=2, hidden_dim=8)
-
-
-def test_require_sthgcn_deps_message():
-    from surd_guided_poi.data import sthgcn_hypergraph as sh
-
-    try:
-        sh.require_sthgcn_deps()
-    except ImportError as e:
-        assert "requirements-sthgcn" in str(e) or "torch_geometric" in str(e) or "PyG" in str(e)
-    else:
-        # PyG installed in this env — OK
-        pass

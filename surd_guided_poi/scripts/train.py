@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Train SURD-guided next-POI on Massive-STEPS official splits.
 
-Backbone selected by ``model.backbone``: flashback | graph_flashback | sthgcn.
+Backbone selected by ``model.backbone``: flashback | graph_flashback.
+(STHGCN: use Massive-STEPS/Spatio-Temporal-Hypergraph-Model directly.)
 """
 
 from __future__ import annotations
@@ -43,14 +44,14 @@ from surd_guided_poi.training.log_format import format_metrics, log_block
 
 
 def drop_unseen_user_poi_enabled(cfg: dict) -> bool:
-    """STHGCN-style cold filter; Flashback/Graph-Flashback leave this off."""
+    """Optional cold filter; Flashback/Graph-Flashback leave this off by default."""
     eval_cfg = cfg.get("eval") or {}
     data_cfg = cfg.get("data") or {}
     if "drop_unseen_user_poi" in eval_cfg:
         return bool(eval_cfg["drop_unseen_user_poi"])
     if "drop_unseen_user_poi" in data_cfg:
         return bool(data_cfg["drop_unseen_user_poi"])
-    return str(cfg.get("model", {}).get("backbone", "flashback")).lower() == "sthgcn"
+    return False
 
 
 def set_seed(seed: int) -> None:
@@ -148,19 +149,6 @@ def main():
     output_dir = resolve_output_dir(cfg["output_dir"])
     output_dir.mkdir(parents=True, exist_ok=True)
     write_json(output_dir / "config_resolved.json", cfg)
-
-    # Full hypergraph STHGCN: NeighborSampler path (not NextPOIBatch / SURD).
-    backbone = str(cfg.get("model", {}).get("backbone", "flashback")).lower()
-    if backbone == "sthgcn":
-        from surd_guided_poi.training.sthgcn_runner import run_sthgcn_baseline
-
-        run_sthgcn_baseline(cfg, device=device, output_dir=output_dir)
-        return
-    if backbone == "sthgcn_seq":
-        print(
-            "WARNING: backbone=sthgcn_seq is DEPRECATED (local Transformer). "
-            "Use backbone=sthgcn for Massive-STEPS full hypergraph STHGCN."
-        )
 
     data_cfg = cfg["data"]
     city = data_cfg["city"]

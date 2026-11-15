@@ -1,9 +1,9 @@
-"""Cold user / POI filtering (Massive-STEPS STHGCN ``remove_unseen_user_poi``).
+"""Optional cold user / POI filtering (``remove_unseen_user_poi``-style).
 
 Flashback / Graph-Flashback keep transductive vocab and do **not** drop cold
-users/POIs at eval. Upstream STHGCN drops val/test rows whose user or target
-POI never appears in the train split. Use ``eval.drop_unseen_user_poi: true``
-(or ``data.drop_unseen_user_poi``) to match that Acc population.
+users/POIs at eval by default. Set ``eval.drop_unseen_user_poi: true``
+(or ``data.drop_unseen_user_poi``) to drop val/test rows whose user or target
+POI never appears in the train split.
 """
 
 from __future__ import annotations

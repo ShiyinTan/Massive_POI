@@ -38,7 +38,6 @@ import pandas as pd
 REPO_ROOT = Path(__file__).resolve().parents[2]
 FLASHBACK_DIR = REPO_ROOT / "Massive-STEPS" / "Flashback"
 GRAPH_FLASHBACK_DIR = REPO_ROOT / "Massive-STEPS" / "Graph-Flashback"
-STHGCN_DIR = REPO_ROOT / "Massive-STEPS" / "Spatio-Temporal-Hypergraph-Model"
 MASSIVE_STEPS_DATA = REPO_ROOT / "Massive-STEPS" / "data"
 
 # Bare module names that collide across Flashback / Graph-Flashback.
@@ -63,14 +62,6 @@ def add_graph_flashback_dir_to_sys_path() -> Path:
     if path not in sys.path:
         sys.path.insert(0, path)
     return GRAPH_FLASHBACK_DIR
-
-
-def add_sthgcn_dir_to_sys_path() -> Path:
-    """Put ``Massive-STEPS/Spatio-Temporal-Hypergraph-Model`` on ``sys.path``."""
-    path = str(STHGCN_DIR)
-    if path not in sys.path:
-        sys.path.insert(0, path)
-    return STHGCN_DIR
 
 
 def import_graph_flashback_network():
