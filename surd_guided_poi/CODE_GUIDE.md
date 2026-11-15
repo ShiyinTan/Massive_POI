@@ -97,6 +97,12 @@ CSV 搜索顺序：`data.data_dir` → `Massive-STEPS/data/{city}/` → HF 缓�
 - Flashback / Q1–Q3 只吃这条样本自己的 history 张量；`user_features` 也只看 `timestamp < target`（默认同一 split）。
 - Transductive 只影响「词表里有没有这个 POI id」，不把别的 split 的打卡塞进序列。
 
+**与 Massive-STEPS Flashback Acc@1 对齐**
+
+- 表中 Beijing **Flashback = 0.278**，**Graph-Flashback = 0.304**（不要把 0.304 当成纯 Flashback）。
+- Acc@1 ≡ Recall@1（单标签 next-POI）；评测默认 `eval.use_all_prefixes: false`（**每条 trail 只评最后一站**，同 Flashback `evaluation.py`）。
+- 推荐默认配置：`configs/model_flashback_aligned.yaml`（`hidden=10`、`rnn`、`lr=0.01`、`use_surd=false`）。要挂 SURD 时再用 `model_surd.yaml` 并设 `train.use_surd=true`。
+
 **关于「序列长度 < 20」：** 本目录默认路径 **不会** 按用户总打卡数 <20 过滤。  
 `configs/base.yaml` 里的 `max_history_len: 50` 只是把每条样本的 **history 截断到最近 50 步**（比上游 Flashback CLI 默认 `sequence_length=20` 更长，仍 Flashback-friendly）；`min_history_len: 1` 只要求每条 trail 至少能切出「1 个历史 + 1 个目标」。  
 上游 Flashback CLI（`Massive-STEPS/Flashback/setting.py`）会设 `sequence_length=20` 且 `min_checkins=sequence_length+1`，那是他们自己的训练入口；我们的 `train.py` 走的是 `load_official_split_frames`，可选 helper `load_flashback_poi_dataloader(..., min_checkins=0)` 默认也不开该过滤。

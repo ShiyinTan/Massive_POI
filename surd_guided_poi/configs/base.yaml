@@ -45,7 +45,12 @@ train:
   weight_decay: 0.00001
   warmup_epochs: 5
   total_epochs: 40
+  # Optional MultiStepLR (Flashback uses [20,40,60,80] × 0.2); empty = no schedule
+  lr_milestones: []
+  lr_gamma: 0.2
   surd_refresh_interval: 5
+  # SURD aux: set use_surd=false or lambda_*=0 to train Flashback-only
+  use_surd: true
   lambda_u: 0.5
   lambda_s: 0.5
   ema_beta: 0.5
@@ -65,3 +70,7 @@ eval:
   frequency_buckets: [0.2, 0.5]
   # 每个 train epoch 后必跑 val；test 可选（略慢，默认开以便对照）
   eval_test_every_epoch: true
+  # Massive-STEPS Flashback Acc@1 协议：val/test 只评每条 trail 的最后一站
+  # （train 仍可用 data.use_all_prefixes=true）。Acc@1 ≡ recall@1。
+  use_all_prefixes: false
+  best_metric: recall@1

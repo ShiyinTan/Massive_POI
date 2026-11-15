@@ -62,4 +62,11 @@ def evaluate_ranking(
         metrics[f"recall@{k}"] = recall_at_k(topk, targets, kk)
         metrics[f"ndcg@{k}"] = ndcg_at_k(topk, targets, kk)
         metrics[f"mrr@{k}"] = mrr_at_k(topk, targets, kk)
+    # Acc@K ≡ Recall@K for single-label next-POI (Massive-STEPS table naming).
+    if 1 in ks:
+        metrics["acc@1"] = metrics["recall@1"]
+    if 5 in ks:
+        metrics["acc@5"] = metrics["recall@5"]
+    if 10 in ks:
+        metrics["acc@10"] = metrics["recall@10"]
     return metrics
