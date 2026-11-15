@@ -327,7 +327,7 @@ def build_samples_from_split(
     vocab: Vocab,
     split_name: str,
     *,
-    max_history_len: int = 20,
+    max_history_len: int = 50,
     min_history_len: int = 1,
     use_all_prefixes: bool = True,
     user_history_df: Optional[pd.DataFrame] = None,
@@ -351,7 +351,7 @@ def build_samples_from_split(
     Length rules / 长度规则（默认 config）::
 
         min_history_len = 1   # need ≥1 history POI → trail needs ≥2 check-ins
-        max_history_len = 20  # truncate history to last 20 (NOT a user filter)
+        max_history_len = 50  # truncate to last 50 (configs default; NOT a user filter)
 
     Does **not** drop users whose total check-ins < 20.
 
@@ -452,7 +452,7 @@ def build_vocab(df: pd.DataFrame) -> Vocab:
     return build_vocab_from_frames({"all": df})
 
 
-def build_samples(df, vocab, max_history_len=20, min_history_len=1, use_all_prefixes=True):
+def build_samples(df, vocab, max_history_len=50, min_history_len=1, use_all_prefixes=True):
     return build_samples_from_split(
         df,
         vocab,

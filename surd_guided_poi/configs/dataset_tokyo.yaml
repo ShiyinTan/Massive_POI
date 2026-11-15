@@ -2,7 +2,7 @@ data:
   city: tokyo
   hf_dataset_id: CRUISEResearchGroup/Massive-STEPS-Tokyo
   data_dir: null
-  max_history_len: 20
+  max_history_len: 50
   use_all_prefixes: true
   split_protocol: massive_steps_official
 

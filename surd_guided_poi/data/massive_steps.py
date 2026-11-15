@@ -19,8 +19,8 @@ Raw CSV row example / 原始 CSV 一行（示意）::
     t_01,U7,101,2020-01-01 09:00:00,, ,39.9,116.4,...
 
 Length filter note / 长度过滤说明：
-  Default SURD path does **not** drop users with <20 check-ins.
-  ``max_history_len=20`` only **truncates** history windows.
+  Default SURD path does **not** drop users with short total check-in counts.
+  ``max_history_len=50`` only **truncates** history windows (Flashback-friendly).
   Trails shorter than ``min_history_len+1`` (default 2 rows) are skipped per trail.
 """
 
