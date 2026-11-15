@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""Train SURD-guided next-POI on Massive-STEPS official splits + Flashback backbone."""
+"""Train SURD-guided next-POI on Massive-STEPS official splits.
+
+Backbone selected by ``model.backbone``: flashback | graph_flashback | sthgcn.
+"""
 
 from __future__ import annotations
 
@@ -28,7 +31,7 @@ from surd_guided_poi.data.preprocessing import (
 )
 from surd_guided_poi.data.splits import assert_official_split_disjoint_trails, carve_estimator_holdout
 from surd_guided_poi.evaluation.ranking_metrics import evaluate_ranking
-from surd_guided_poi.models.full_model import SURDGuidedPOIModel
+from surd_guided_poi.models.full_model import build_surd_model
 from surd_guided_poi.training.alternating import AlternatingSURDTrainer
 from surd_guided_poi.training.checkpoint import load_checkpoint, write_json
 from surd_guided_poi.training.config import load_config
@@ -97,23 +100,6 @@ def build_loaders(samples_dict, batch_size, num_workers):
             collate_fn=collate_next_poi,
         )
     return loaders
-
-
-def build_model(vocab, model_cfg: dict) -> SURDGuidedPOIModel:
-    hidden = int(model_cfg["hidden_dim"])
-    return SURDGuidedPOIModel(
-        num_pois=vocab.num_pois,
-        num_users=vocab.num_users,
-        hidden_dim=hidden,
-        poi_emb_dim=int(model_cfg.get("poi_emb_dim", hidden)),
-        num_layers_history=int(model_cfg.get("num_layers_history", 1)),
-        subset_hidden_dim=int(model_cfg.get("subset_hidden_dim", hidden)),
-        dropout=float(model_cfg.get("dropout", 0.1)),
-        rnn_type=str(model_cfg.get("rnn_type", "gru")),
-        lambda_t=float(model_cfg.get("lambda_t", 0.1)),
-        lambda_s=float(model_cfg.get("lambda_s", 100.0)),
-        share_poi_embedding=bool(model_cfg.get("share_poi_embedding", True)),
-    )
 
 
 def main():
@@ -192,7 +178,7 @@ def main():
             "city": city,
             "split_protocol": "massive_steps_official_trail_stratified",
             "split_paths": {k: str(v) for k, v in split_paths.items()},
-            "backbone": "Flashback (Massive-STEPS/Flashback)",
+            "backbone": str(cfg.get("model", {}).get("backbone", "flashback")),
             "num_pois": vocab.num_pois,
             "num_users": vocab.num_users,
             "n_train": len(model_train),
@@ -213,6 +199,7 @@ def main():
                 f"train_prefixes={bool(data_cfg.get('use_all_prefixes', True))}  "
                 f"eval_prefixes={eval_prefixes}  "
                 f"use_surd={bool(cfg.get('train', {}).get('use_surd', True))}  "
+                f"backbone={cfg.get('model', {}).get('backbone', 'flashback')}  "
                 f"rnn={cfg.get('model', {}).get('rnn_type')}  "
                 f"hidden={cfg.get('model', {}).get('hidden_dim')}",
                 f"device={device}",
@@ -232,7 +219,9 @@ def main():
         num_workers=int(cfg["train"]["num_workers"]),
     )
 
-    model = build_model(vocab, cfg["model"])
+    # Graph-Flashback builds count graphs from full official-train samples
+    # (before carve) unless transition_pkl / interact_pkl are set.
+    model = build_surd_model(vocab, cfg["model"], train_samples=train_samples)
     trainer = AlternatingSURDTrainer(
         model=model,
         train_loader=loaders["train"],

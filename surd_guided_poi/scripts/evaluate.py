@@ -24,7 +24,7 @@ from surd_guided_poi.data.preprocessing import (
 )
 from surd_guided_poi.evaluation.long_tail_metrics import evaluate_by_frequency, frequency_buckets
 from surd_guided_poi.evaluation.ranking_metrics import evaluate_ranking
-from surd_guided_poi.models.full_model import SURDGuidedPOIModel
+from surd_guided_poi.models.full_model import build_surd_model
 from surd_guided_poi.training.checkpoint import load_checkpoint, write_json
 from surd_guided_poi.training.config import load_config
 
@@ -46,22 +46,6 @@ def _samples(frame, vocab, split: str, data_cfg: dict, eval_cfg: dict | None = N
         min_history_len=int(data_cfg["min_history_len"]),
         use_all_prefixes=prefixes,
         user_history_df=frame,
-    )
-
-
-def _build_model(vocab, model_cfg: dict) -> SURDGuidedPOIModel:
-    hidden = int(model_cfg["hidden_dim"])
-    return SURDGuidedPOIModel(
-        num_pois=vocab.num_pois,
-        num_users=vocab.num_users,
-        hidden_dim=hidden,
-        poi_emb_dim=int(model_cfg.get("poi_emb_dim", hidden)),
-        subset_hidden_dim=int(model_cfg.get("subset_hidden_dim", hidden)),
-        dropout=float(model_cfg.get("dropout", 0.1)),
-        rnn_type=str(model_cfg.get("rnn_type", "gru")),
-        lambda_t=float(model_cfg.get("lambda_t", 0.1)),
-        lambda_s=float(model_cfg.get("lambda_s", 100.0)),
-        share_poi_embedding=bool(model_cfg.get("share_poi_embedding", True)),
     )
 
 
@@ -97,12 +81,17 @@ def main():
     )
     vocab = build_vocab_from_frames(frames)
     eval_cfg = cfg.get("eval", {})
-    train_samples = _samples(frames["train"], vocab, "train", data_cfg, eval_cfg)
+    # Graphs for graph_flashback: rebuild from train with all prefixes (match train.py).
+    train_samples_for_graphs = _samples(
+        frames["train"], vocab, "train", data_cfg, {"use_all_prefixes": True}
+    )
     test_samples = _samples(frames["test"], vocab, "test", data_cfg, eval_cfg)
     # 长尾分桶要用整数 N_y，不能用归一化的 prior
-    train_counts = poi_sample_counts(train_samples, vocab.num_pois)
+    train_counts = poi_sample_counts(train_samples_for_graphs, vocab.num_pois)
 
-    model = _build_model(vocab, cfg["model"])
+    model = build_surd_model(
+        vocab, cfg["model"], train_samples=train_samples_for_graphs
+    )
     load_checkpoint(args.checkpoint, model, map_location=device)
     model.to(device)
 
