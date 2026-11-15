@@ -47,10 +47,12 @@ class AlternatingSURDTrainer:
         config: Dict[str, Any],
         device: torch.device,
         output_dir: str | Path,
+        test_loader: Optional[DataLoader] = None,
     ):
         self.model = model.to(device)
         self.train_loader = train_loader  # carve 的 model_train：推荐主训
         self.val_loader = val_loader
+        self.test_loader = test_loader  # 可选：每 epoch 打 test（不参与选 best）
         # carve 的 model_train：Phase A 拟合子集头（与估 MI 的样本分开）
         self.estimator_fit_loader = estimator_fit_loader
         # carve 的 estimation holdout：Phase A 只在这里算 Specific MI / SURD
@@ -72,6 +74,16 @@ class AlternatingSURDTrainer:
         self.weight_tensors: Optional[Dict[str, Any]] = None
         self.best_val = -1.0
         self.history = []
+
+    def _eval_test_every_epoch(self) -> bool:
+        return bool(self.config.get("eval", {}).get("eval_test_every_epoch", False)) and (
+            self.test_loader is not None
+        )
+
+    def _ranking_on(self, loader: DataLoader) -> Dict[str, float]:
+        return evaluate_ranking(
+            self.model, loader, self.device, ks=self.config["eval"]["ks"]
+        )
 
     def _rec_parameters(self):
         """Flashback backbone + SURD side encoders (not subset heads)."""
@@ -117,18 +129,13 @@ class AlternatingSURDTrainer:
                 self.optimizer.step()
                 total += float(loss.item())
                 n += 1
-            metrics = evaluate_ranking(
-                self.model, self.val_loader, self.device, ks=self.config["eval"]["ks"]
-            )
-            print(
-                log_block(
-                    epoch_title("warmup", epoch + 1, epochs),
-                    [
-                        f"train  loss={total / max(n, 1):.4f}",
-                        f"val    {format_metrics(metrics)}",
-                    ],
-                )
-            )
+            lines = [
+                f"train  loss={total / max(n, 1):.4f}",
+                f"val    {format_metrics(self._ranking_on(self.val_loader))}",
+            ]
+            if self._eval_test_every_epoch():
+                lines.append(f"test   {format_metrics(self._ranking_on(self.test_loader))}")
+            print(log_block(epoch_title("warmup", epoch + 1, epochs), lines))
 
     def fit_subset_estimators(self) -> None:
         """Phase A part 1: fine-tune subset heads with encoders optionally frozen."""
@@ -320,6 +327,8 @@ class AlternatingSURDTrainer:
                     f"total_epochs={total_epochs}  "
                     f"surd_refresh_every={refresh_every}  "
                     f"subset_fit_epochs={self.config['train']['subset_fit_epochs']}",
+                    f"eval_every_epoch  val=yes  "
+                    f"test={'yes' if self._eval_test_every_epoch() else 'no'}",
                 ],
             )
         )
@@ -328,10 +337,14 @@ class AlternatingSURDTrainer:
 
         for epoch in range(1, total_epochs + 1):
             train_stats = self.train_recommendation_epoch(epoch)
-            val_metrics = evaluate_ranking(
-                self.model, self.val_loader, self.device, ks=self.config["eval"]["ks"]
+            # 每个 epoch 必跑 val；test 由 eval.eval_test_every_epoch 控制（不参与选 best）
+            val_metrics = self._ranking_on(self.val_loader)
+            test_metrics = (
+                self._ranking_on(self.test_loader) if self._eval_test_every_epoch() else None
             )
-            record = {"epoch": epoch, "train": train_stats, "val": val_metrics}
+            record: Dict[str, Any] = {"epoch": epoch, "train": train_stats, "val": val_metrics}
+            if test_metrics is not None:
+                record["test"] = test_metrics
             self.history.append(record)
 
             score = val_metrics.get("recall@5", val_metrics.get("recall@1", 0.0))
@@ -340,8 +353,10 @@ class AlternatingSURDTrainer:
                 f"train  {format_train_losses(train_stats)}",
                 f"val    {format_metrics(val_metrics)}",
             ]
+            if test_metrics is not None:
+                lines.append(f"test   {format_metrics(test_metrics)}")
             if is_best:
-                lines.append(f"★ new best  R@5={float(score):.4f}")
+                lines.append(f"★ new best (val R@5={float(score):.4f})")
             print(log_block(epoch_title("epoch", epoch, total_epochs), lines))
 
             if is_best:
@@ -350,7 +365,7 @@ class AlternatingSURDTrainer:
                     self.output_dir / "best.pt",
                     self.model,
                     self.optimizer,
-                    meta={"epoch": epoch, "val": val_metrics},
+                    meta={"epoch": epoch, "val": val_metrics, "test": test_metrics},
                 )
 
             # 周期性重估 SURD 权重（EMA 平滑）

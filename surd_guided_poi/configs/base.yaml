@@ -62,3 +62,5 @@ surd:
 eval:
   ks: [1, 5, 10]
   frequency_buckets: [0.2, 0.5]
+  # 每个 train epoch 后必跑 val；test 可选（略慢，默认开以便对照）
+  eval_test_every_epoch: true
