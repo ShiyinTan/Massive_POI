@@ -183,23 +183,27 @@ Massive-STEPS official batch
 
 ## 6. 怎么跑？
 
+**只跑骨干、对齐 Massive-STEPS Acc（SURD 关）** → 详见 [`docs/BASELINE_ONLY.md`](docs/BASELINE_ONLY.md)。
+
+要点：Flashback/GF 不丢冷用户/POI；STHGCN `drop_unseen_user_poi: true`；评测 last-only；Graph-Flashback 对齐 0.304 需 KGE pkl。
+
 ```bash
 cd surd_guided_poi
 pip install -r requirements.txt
 
-# 使用 HF 上的官方 Beijing split（或 --data_dir 指向本地官方 CSV 目录）
+# SURD 开
 python scripts/train.py \
   --config configs/base.yaml configs/dataset_beijing.yaml configs/model_surd.yaml \
   --data_dir /tmp/massive-steps-data/Beijing
 
-# 换骨干：model_flashback_aligned / model_graph_flashback / model_sthgcn
+# Baseline-only（SURD off）— Flashback Acc@1 目标 0.278
 python scripts/train.py \
-  --config configs/base.yaml configs/dataset_beijing.yaml configs/model_graph_flashback.yaml \
+  --config configs/base.yaml configs/dataset_beijing.yaml configs/model_flashback_aligned.yaml \
   --data_dir /tmp/massive-steps-data/Beijing
 
 python scripts/evaluate.py --checkpoint outputs/beijing/best.pt \
   --data_dir /tmp/massive-steps-data/Beijing \
-  --config configs/base.yaml configs/dataset_beijing.yaml configs/model_graph_flashback.yaml
+  --config configs/base.yaml configs/dataset_beijing.yaml configs/model_flashback_aligned.yaml
 
 # 仓库根目录跑测试
 python -m pytest surd_guided_poi/tests -q
@@ -231,6 +235,7 @@ beijing_checkins_test.csv
 
 - Massive-STEPS 官方 split + Flashback 坐标/轨迹约定  
 - 可切换骨干：`flashback` / `graph_flashback` / `sthgcn`（序列适配）+ SURD U/S 指导  
+- Baseline-only：SURD 关、last-only eval、STHGCN 冷用户/冷 POI 过滤（`docs/BASELINE_ONLY.md`）  
 - 中文指南与规格入库  
 
 **仍延后**

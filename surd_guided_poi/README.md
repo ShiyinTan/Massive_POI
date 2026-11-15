@@ -29,7 +29,7 @@ python scripts/train.py \
   --config configs/base.yaml configs/dataset_beijing.yaml configs/model_surd.yaml \
   --data_dir /path/to/Beijing   # contains beijing_checkins_{train,validation,test}.csv
 
-# Switch backbone (examples)
+# Baseline-only (SURD off) — see docs/BASELINE_ONLY.md
 python scripts/train.py \
   --config configs/base.yaml configs/dataset_beijing.yaml configs/model_flashback_aligned.yaml \
   --data_dir /path/to/Beijing
@@ -42,6 +42,8 @@ python scripts/train.py \
 
 python scripts/evaluate.py --checkpoint outputs/beijing/best.pt --data_dir /path/to/Beijing
 ```
+
+Baseline Acc protocol (last-only eval, STHGCN cold drop, hparams): [`docs/BASELINE_ONLY.md`](docs/BASELINE_ONLY.md).
 
 Tests (repo root):
 

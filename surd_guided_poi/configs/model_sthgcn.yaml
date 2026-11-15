@@ -1,28 +1,37 @@
-# STHGCN sequential baseline inside surd_guided_poi (NextPOIBatch adapter).
-# Ports the SequentialTransformer idea from
-# Massive-STEPS/Spatio-Temporal-Hypergraph-Model (POI/time emb + Transformer).
-# Full hypergraph STHGCN still needs torch_geometric — use upstream run.py.
+# STHGCN sequential baseline inside surd_guided_poi (SURD off).
+# Ports SequentialTransformer knobs from
+# Massive-STEPS/Spatio-Temporal-Hypergraph-Model/conf/std_conf/beijing.yml
+# (seq_transformer_args + run_args), adapted to NextPOIBatch.
+#
+# Protocol aligned with upstream STHGCN Acc population:
+#   - eval.drop_unseen_user_poi: true  (= remove_unseen_user_poi)
+#   - eval last-only; train prefixes
+#   - same-split history before target
+#
+# Massive-STEPS README Beijing Acc@1: STHGCN = 0.453 is the FULL hypergraph
+# model (torch_geometric). This config is the sequence adapter — Acc will not
+# match 0.453; use upstream run.py for the published hypergraph number.
 
 model:
   backbone: sthgcn
-  hidden_dim: 64
-  subset_hidden_dim: 64
-  dropout: 0.1
+  hidden_dim: 128
+  subset_hidden_dim: 128
+  dropout: 0.3
   share_poi_embedding: true
   sthgcn_num_layers: 2
-  sthgcn_num_heads: 4
-  # sthgcn_ff_dim: 128
+  sthgcn_num_heads: 2
+  sthgcn_ff_dim: 512
 
 data:
   max_history_len: 20
   use_all_prefixes: true
 
 train:
-  batch_size: 64
-  lr: 0.001
+  batch_size: 16
+  lr: 0.0001
   weight_decay: 0.00001
   warmup_epochs: 0
-  total_epochs: 40
+  total_epochs: 20
   use_surd: false
   lambda_u: 0.0
   lambda_s: 0.0
@@ -32,6 +41,7 @@ train:
 
 eval:
   use_all_prefixes: false
+  drop_unseen_user_poi: true
   best_metric: recall@1
   eval_test_every_epoch: true
   ks: [1, 5, 10]

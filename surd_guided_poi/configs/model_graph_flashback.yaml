@@ -1,8 +1,14 @@
-# Graph-Flashback baseline (Massive-STEPS/Graph-Flashback) inside surd_guided_poi.
-# Builds count-based transition / interact graphs from official train unless
-# transition_pkl / interact_pkl point at KGE pickles.
+# Massive-STEPS Graph-Flashback parity (SURD off).
+# Source: Massive-STEPS/Graph-Flashback/setting.py + run_train.sh.
 #
-# Massive-STEPS README Beijing Acc@1: Graph-Flashback = 0.304 (vs Flashback 0.278).
+# Protocol (same as Flashback): no cold drop; train prefixes; eval last-only;
+# same-split history. Graphs: prefer KGE pkls (run_train.sh) for Acc parity;
+# otherwise count-graphs from official train (fallback — Acc may be lower).
+#
+# Massive-STEPS README Beijing Acc@1: Graph-Flashback = 0.304
+# Requires city KGE pickles, e.g.:
+#   transition_pkl: Massive-STEPS/Graph-Flashback/POI_graph/beijing_scheme2_transe_loc_temporal_20.pkl
+#   interact_pkl:   Massive-STEPS/Graph-Flashback/POI_graph/beijing_scheme2_transe_user-loc_20.pkl
 
 model:
   backbone: graph_flashback
@@ -18,16 +24,15 @@ model:
   use_graph_user: false
   use_spatial_graph: false
   share_poi_embedding: true
-  # Optional Massive-STEPS KGE graph pickles (same shapes as Graph-Flashback train.py):
-  # transition_pkl: /path/to/poi_transition.pkl
-  # interact_pkl: /path/to/user_poi_interact.pkl
+  # transition_pkl: null
+  # interact_pkl: null
 
 data:
   max_history_len: 20
   use_all_prefixes: true
 
 train:
-  batch_size: 64
+  batch_size: 10  # Graph-Flashback run_train.sh beijing
   lr: 0.01
   weight_decay: 0.0
   warmup_epochs: 0
@@ -43,6 +48,7 @@ train:
 
 eval:
   use_all_prefixes: false
+  drop_unseen_user_poi: false
   best_metric: recall@1
   eval_test_every_epoch: true
   ks: [1, 5, 10]

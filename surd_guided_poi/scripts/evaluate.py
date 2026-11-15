@@ -15,6 +15,10 @@ REPO_ROOT = PKG_ROOT.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from surd_guided_poi.data.cold_filter import (
+    maybe_drop_unseen_user_poi,
+    seen_user_poi_ids_from_train_frame,
+)
 from surd_guided_poi.data.dataset import NextPOIDataset, collate_next_poi
 from surd_guided_poi.data.massive_steps import load_official_split_frames
 from surd_guided_poi.data.preprocessing import (
@@ -27,6 +31,16 @@ from surd_guided_poi.evaluation.ranking_metrics import evaluate_ranking
 from surd_guided_poi.models.full_model import build_surd_model
 from surd_guided_poi.training.checkpoint import load_checkpoint, write_json
 from surd_guided_poi.training.config import load_config
+
+
+def drop_unseen_user_poi_enabled(cfg: dict) -> bool:
+    eval_cfg = cfg.get("eval") or {}
+    data_cfg = cfg.get("data") or {}
+    if "drop_unseen_user_poi" in eval_cfg:
+        return bool(eval_cfg["drop_unseen_user_poi"])
+    if "drop_unseen_user_poi" in data_cfg:
+        return bool(data_cfg["drop_unseen_user_poi"])
+    return str(cfg.get("model", {}).get("backbone", "flashback")).lower() == "sthgcn"
 
 
 def _config_paths(args_config: list[str]) -> list[Path]:
@@ -81,11 +95,16 @@ def main():
     )
     vocab = build_vocab_from_frames(frames)
     eval_cfg = cfg.get("eval", {})
+    drop_cold = drop_unseen_user_poi_enabled(cfg)
     # Graphs for graph_flashback: rebuild from train with all prefixes (match train.py).
     train_samples_for_graphs = _samples(
         frames["train"], vocab, "train", data_cfg, {"use_all_prefixes": True}
     )
     test_samples = _samples(frames["test"], vocab, "test", data_cfg, eval_cfg)
+    train_users, train_pois = seen_user_poi_ids_from_train_frame(frames["train"], vocab)
+    test_samples = maybe_drop_unseen_user_poi(
+        test_samples, train_user_ids=train_users, train_poi_ids=train_pois, enabled=drop_cold
+    )
     # 长尾分桶要用整数 N_y，不能用归一化的 prior
     train_counts = poi_sample_counts(train_samples_for_graphs, vocab.num_pois)
 
@@ -119,6 +138,9 @@ def main():
         "ranking": metrics,
         "long_tail": long_tail,
         "split_protocol": "massive_steps_official",
+        "drop_unseen_user_poi": drop_cold,
+        "n_test": len(test_samples),
+        "backbone": str(cfg.get("model", {}).get("backbone", "flashback")),
         "device": str(device),
     }
     out = Path(args.output_json)

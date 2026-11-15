@@ -1,10 +1,13 @@
-# Align recommendation backbone with Massive-STEPS/Flashback defaults
-# (setting.py + run_train.sh). SURD aux off by default so Acc@1 matches
-# Flashback; turn on with train.use_surd / lambda_u|lambda_s > 0.
+# Massive-STEPS Flashback parity (SURD off).
+# Source: Massive-STEPS/Flashback/setting.py + run_train.sh (Beijing batch-size 10).
 #
-# Massive-STEPS README Beijing Acc@1:
-#   Flashback = 0.278   Graph-Flashback = 0.304
-# Our metric Acc@1 ≡ recall@1 (single-label next-POI).
+# Protocol aligned with upstream Flashback:
+#   - no cold user/POI drop (transductive vocab)
+#   - train: all prefixes; eval: last-POI-only
+#   - same-split trail history before target
+#
+# Massive-STEPS README Beijing Acc@1: Flashback = 0.278
+# Our Acc@1 ≡ recall@1. Prior smoke on cached Beijing CSVs: Acc@1 ≈ 0.2783.
 
 model:
   backbone: flashback
@@ -17,21 +20,18 @@ model:
   share_poi_embedding: true
 
 data:
-  # Flashback CLI sequence_length default
   max_history_len: 20
-  # Train on all prefixes (≈ multi-step CE coverage); eval is last-only.
   use_all_prefixes: true
 
 train:
-  batch_size: 64
+  # Flashback run_train.sh uses --batch-size 10 for beijing, 100 otherwise.
+  batch_size: 10
   lr: 0.01
   weight_decay: 0.0
   warmup_epochs: 0
   total_epochs: 100
-  # Flashback MultiStepLR milestones
   lr_milestones: [20, 40, 60, 80]
   lr_gamma: 0.2
-  # SURD optional — off for Flashback parity
   use_surd: false
   lambda_u: 0.0
   lambda_s: 0.0
@@ -40,9 +40,8 @@ train:
   grad_clip: 5.0
 
 eval:
-  # Massive-STEPS Flashback Evaluation: one prediction = last POI of each trail
   use_all_prefixes: false
-  # Early-stop / best checkpoint on Acc@1 (= recall@1), same as Flashback
+  drop_unseen_user_poi: false
   best_metric: recall@1
   eval_test_every_epoch: true
   ks: [1, 5, 10]
