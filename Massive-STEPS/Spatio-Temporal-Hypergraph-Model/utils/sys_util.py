@@ -16,7 +16,7 @@ def get_root_dir():
 
 def set_logger(args):
     """
-    Write logs to checkpoint and console
+    Write logs to file and console (pretty epoch / Acc@K / MRR lines).
     """
     if args.do_train:
         log_file = osp.join(args.log_path or args.init_checkpoint, 'train.log')
@@ -24,16 +24,22 @@ def set_logger(args):
         log_file = osp.join(args.log_path or args.init_checkpoint, 'test.log')
 
     # Remove all handlers associated with the root logger object
-    for handler in logging.root.handlers:
+    for handler in logging.root.handlers[:]:
         logging.root.removeHandler(handler)
 
-    logging.basicConfig(
-        format='%(asctime)s %(levelname)-8s %(message)s',
-        level=logging.INFO,
+    log_format = logging.Formatter(
+        fmt='%(asctime)s %(levelname)-8s %(message)s',
         datefmt='%Y-%m-%d %H:%M:%S',
-        filename=log_file,
-        filemode='w+'
     )
+    logging.root.setLevel(logging.INFO)
+
+    file_handler = logging.FileHandler(log_file, mode='w+')
+    file_handler.setFormatter(log_format)
+    logging.root.addHandler(file_handler)
+
+    console_handler = logging.StreamHandler()
+    console_handler.setFormatter(log_format)
+    logging.root.addHandler(console_handler)
 
 
 def seed_torch(seed=42):
