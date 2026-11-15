@@ -48,6 +48,22 @@ def require_sthgcn_deps() -> None:
         )
 
 
+def fixed_sthgcn_root() -> str:
+    """Absolute Massive-STEPS STHGCN package root (cwd-independent)."""
+    return str(STHGCN_DIR)
+
+
+@contextmanager
+def _sthgcn_cwd():
+    """``chdir`` into the STHGCN package so cwd-based ``get_root_dir`` succeeds."""
+    prev = os.getcwd()
+    os.chdir(STHGCN_DIR)
+    try:
+        yield
+    finally:
+        os.chdir(prev)
+
+
 @contextmanager
 def _sthgcn_import_context():
     """Put STHGCN package first on sys.path; isolate bare module names."""
@@ -80,6 +96,28 @@ def _sthgcn_import_context():
             sys.modules[name] = mod
 
 
+def _install_fixed_get_root_dir() -> None:
+    """Rebind ``get_root_dir`` in every loaded upstream module (+ class attrs).
+
+    Upstream ``utils.sys_util.get_root_dir`` parses ``os.getcwd()`` for
+    ``Spatio-Temporal-Hypergraph-Model``. ``preprocess.file_reader.FileReaderBase``
+    also caches ``root_path = get_root_dir()`` at class body time.
+    """
+    import utils.sys_util as sys_util_mod  # type: ignore
+
+    sys_util_mod.get_root_dir = fixed_sthgcn_root
+    for name, mod in list(sys.modules.items()):
+        root = name.split(".", 1)[0]
+        if root not in _STHGCN_COLLIDING and name not in _STHGCN_COLLIDING:
+            continue
+        if hasattr(mod, "get_root_dir"):
+            setattr(mod, "get_root_dir", fixed_sthgcn_root)
+        # Class-level cache set during import under chdir — refresh to absolute path.
+        frb = getattr(mod, "FileReaderBase", None)
+        if frb is not None and hasattr(frb, "root_path"):
+            frb.root_path = fixed_sthgcn_root()
+
+
 def import_sthgcn_stack() -> Dict[str, Any]:
     """Import upstream STHGCN modules under isolation; cache on first call."""
     cache_key = "surd_guided_poi._vendor.sthgcn_stack"
@@ -88,25 +126,24 @@ def import_sthgcn_stack() -> Dict[str, Any]:
 
     require_sthgcn_deps()
     with _sthgcn_import_context():
-        import utils as sthgcn_utils  # type: ignore
-        import preprocess as sthgcn_preprocess  # type: ignore
-        import dataset as sthgcn_dataset  # type: ignore
-        import layer as sthgcn_layer  # type: ignore
-        import model as sthgcn_model  # type: ignore
+        # Patch BEFORE importing preprocess: FileReaderBase.root_path = get_root_dir()
+        # at class body. Also chdir so any unpatched cwd lookup still finds the package.
+        with _sthgcn_cwd():
+            import utils.sys_util as sys_util_mod  # type: ignore
 
-        # Pin get_root_dir to fixed package path (upstream uses cwd).
-        def _fixed_root():
-            return str(STHGCN_DIR)
+            sys_util_mod.get_root_dir = fixed_sthgcn_root
 
-        sthgcn_utils.get_root_dir = _fixed_root  # type: ignore[attr-defined]
-        if hasattr(sthgcn_utils, "sys_util"):
-            sthgcn_utils.sys_util.get_root_dir = _fixed_root  # type: ignore[attr-defined]
-        # conf_util imported get_root_dir by name — patch module attribute used later
-        import utils.sys_util as sys_util_mod  # type: ignore
-        import utils.conf_util as conf_util_mod  # type: ignore
+            import utils as sthgcn_utils  # type: ignore
 
-        sys_util_mod.get_root_dir = _fixed_root
-        conf_util_mod.get_root_dir = _fixed_root
+            sthgcn_utils.get_root_dir = fixed_sthgcn_root  # type: ignore[attr-defined]
+
+            import preprocess as sthgcn_preprocess  # type: ignore
+            import dataset as sthgcn_dataset  # type: ignore
+            import layer as sthgcn_layer  # type: ignore
+            import model as sthgcn_model  # type: ignore
+            import utils.conf_util as conf_util_mod  # type: ignore
+
+            _install_fixed_get_root_dir()
 
         stack = {
             "utils": sthgcn_utils,
@@ -115,7 +152,7 @@ def import_sthgcn_stack() -> Dict[str, Any]:
             "layer": sthgcn_layer,
             "model": sthgcn_model,
             "Cfg": conf_util_mod.Cfg,
-            "get_root_dir": _fixed_root,
+            "get_root_dir": fixed_sthgcn_root,
         }
     # Keep stack modules alive under vendor names; leave bare names cleared.
     for bare in _STHGCN_COLLIDING:
@@ -210,14 +247,12 @@ def prepare_sthgcn_pipeline(
     cfg = load_sthgcn_cfg(conf_relpath, city=city, overrides=overrides)
     cfg.run_args.device = device
 
-    # Ensure working directory semantics for any relative paths inside preprocess.
-    prev_cwd = os.getcwd()
-    try:
-        os.chdir(STHGCN_DIR)
+    # Preprocess / LBSNDataset call get_root_dir(); stay under package cwd and
+    # keep the absolute-path patch installed (import may have cleared bare names).
+    with _sthgcn_cwd():
+        _install_fixed_get_root_dir()
         stack["preprocess"].preprocess(cfg)
         lbsn_dataset = stack["dataset"].LBSNDataset(cfg)
-    finally:
-        os.chdir(prev_cwd)
 
     cfg.dataset_args.spatial_slots = lbsn_dataset.spatial_slots
     cfg.dataset_args.num_user = lbsn_dataset.num_user

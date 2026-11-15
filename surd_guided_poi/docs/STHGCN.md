@@ -17,6 +17,11 @@ pip install -r requirements-sthgcn.txt
 Fail-fast: importing / training with `backbone=sthgcn` raises `ImportError` if
 `torch_geometric` / `torch_sparse` / `torch_scatter` are missing.
 
+**cwd note:** upstream `get_root_dir()` parses `os.getcwd()` for
+`Spatio-Temporal-Hypergraph-Model`. `surd_guided_poi` chdirs into that package
+during import/preprocess and patches `get_root_dir` to `STHGCN_DIR`, so you can
+launch `scripts/train.py` from the repo root or any other directory.
+
 ## Run (SURD off)
 
 ```bash
