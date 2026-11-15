@@ -61,16 +61,27 @@ def resolve_output_dir(raw: str | Path) -> Path:
     return PKG_ROOT / output_dir
 
 
-def build_split_samples(frame, vocab, split_name: str, data_cfg: dict):
+def build_split_samples(
+    frame,
+    vocab,
+    split_name: str,
+    data_cfg: dict,
+    *,
+    use_all_prefixes: bool | None = None,
+):
     # 每个 split 单独建样本：序列 history = 该 CSV 内同 trail 前缀（无跨 split dump）。
     # user_history_df=frame → 6 维 user_features 也只看本 split 且 timestamp < target。
+    # val/test: prefer eval.use_all_prefixes=false (last POI only = Massive-STEPS Acc@1).
+    prefixes = (
+        bool(data_cfg["use_all_prefixes"]) if use_all_prefixes is None else bool(use_all_prefixes)
+    )
     return build_samples_from_split(
         frame,
         vocab,
         split_name,
         max_history_len=int(data_cfg["max_history_len"]),
         min_history_len=int(data_cfg["min_history_len"]),
-        use_all_prefixes=bool(data_cfg["use_all_prefixes"]),
+        use_all_prefixes=prefixes,
         user_history_df=frame,
     )
 
@@ -110,7 +121,12 @@ def main():
     parser.add_argument(
         "--config",
         nargs="+",
-        default=["configs/base.yaml", "configs/dataset_beijing.yaml", "configs/model_surd.yaml"],
+        default=[
+            "configs/base.yaml",
+            "configs/dataset_beijing.yaml",
+            "configs/model_flashback_aligned.yaml",
+        ],
+        help="Default: Flashback-aligned Beijing (SURD off). Use model_surd.yaml to enable SURD.",
     )
     parser.add_argument("--data_dir", default=None, help="Directory with official Massive-STEPS split CSVs")
     parser.add_argument("--output_dir", default=None)
@@ -152,9 +168,16 @@ def main():
     assert_official_split_disjoint_trails(frames)
     vocab = build_vocab_from_frames(frames)
 
+    eval_cfg = cfg.get("eval", {})
+    # Train: all prefixes (default). Val/test: last-POI-only for Massive-STEPS Acc@1 parity.
+    eval_prefixes = bool(eval_cfg.get("use_all_prefixes", False))
     train_samples = build_split_samples(frames["train"], vocab, "train", data_cfg)
-    val_samples = build_split_samples(frames["val"], vocab, "val", data_cfg)
-    test_samples = build_split_samples(frames["test"], vocab, "test", data_cfg)
+    val_samples = build_split_samples(
+        frames["val"], vocab, "val", data_cfg, use_all_prefixes=eval_prefixes
+    )
+    test_samples = build_split_samples(
+        frames["test"], vocab, "test", data_cfg, use_all_prefixes=eval_prefixes
+    )
 
     # carve：train 内再切 — model_train 训推荐；estimation 只给 Phase A 估 SURD
     model_train, estimation = carve_estimator_holdout(
@@ -187,6 +210,11 @@ def main():
                 f"POIs={vocab.num_pois}  users={vocab.num_users}",
                 f"train={len(model_train)}  est={len(estimation)}  "
                 f"val={len(val_samples)}  test={len(test_samples)}",
+                f"train_prefixes={bool(data_cfg.get('use_all_prefixes', True))}  "
+                f"eval_prefixes={eval_prefixes}  "
+                f"use_surd={bool(cfg.get('train', {}).get('use_surd', True))}  "
+                f"rnn={cfg.get('model', {}).get('rnn_type')}  "
+                f"hidden={cfg.get('model', {}).get('hidden_dim')}",
                 f"device={device}",
             ],
         )

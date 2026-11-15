@@ -33,15 +33,18 @@ def _config_paths(args_config: list[str]) -> list[Path]:
     return [Path(c) if Path(c).is_file() else PKG_ROOT / c for c in args_config]
 
 
-def _samples(frame, vocab, split: str, data_cfg: dict):
+def _samples(frame, vocab, split: str, data_cfg: dict, eval_cfg: dict | None = None):
     # History = this split CSV only, same-trail prefixes before the target (no dump leak).
+    # Default eval: last POI of each trail (Massive-STEPS Flashback Acc@1).
+    eval_cfg = eval_cfg or {}
+    prefixes = bool(eval_cfg.get("use_all_prefixes", data_cfg.get("use_all_prefixes", False)))
     return build_samples_from_split(
         frame,
         vocab,
         split,
         max_history_len=int(data_cfg["max_history_len"]),
         min_history_len=int(data_cfg["min_history_len"]),
-        use_all_prefixes=bool(data_cfg["use_all_prefixes"]),
+        use_all_prefixes=prefixes,
         user_history_df=frame,
     )
 
@@ -93,8 +96,9 @@ def main():
         hf_dataset_id=data_cfg.get("hf_dataset_id"),
     )
     vocab = build_vocab_from_frames(frames)
-    train_samples = _samples(frames["train"], vocab, "train", data_cfg)
-    test_samples = _samples(frames["test"], vocab, "test", data_cfg)
+    eval_cfg = cfg.get("eval", {})
+    train_samples = _samples(frames["train"], vocab, "train", data_cfg, eval_cfg)
+    test_samples = _samples(frames["test"], vocab, "test", data_cfg, eval_cfg)
     # 长尾分桶要用整数 N_y，不能用归一化的 prior
     train_counts = poi_sample_counts(train_samples, vocab.num_pois)
 

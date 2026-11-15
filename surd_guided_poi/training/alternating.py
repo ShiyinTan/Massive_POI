@@ -70,15 +70,34 @@ class AlternatingSURDTrainer:
             lr=train_cfg["lr"],
             weight_decay=train_cfg["weight_decay"],
         )
+        milestones = list(train_cfg.get("lr_milestones") or [])
+        self.scheduler = (
+            torch.optim.lr_scheduler.MultiStepLR(
+                self.optimizer,
+                milestones=milestones,
+                gamma=float(train_cfg.get("lr_gamma", 0.2)),
+            )
+            if milestones
+            else None
+        )
         self.weights: Optional[Dict[str, Any]] = None
         self.weight_tensors: Optional[Dict[str, Any]] = None
         self.best_val = -1.0
         self.history = []
 
+    def _use_surd(self) -> bool:
+        train_cfg = self.config.get("train", {})
+        if "use_surd" in train_cfg:
+            return bool(train_cfg["use_surd"])
+        return float(train_cfg.get("lambda_u", 0.0)) > 0 or float(train_cfg.get("lambda_s", 0.0)) > 0
+
     def _eval_test_every_epoch(self) -> bool:
         return bool(self.config.get("eval", {}).get("eval_test_every_epoch", False)) and (
             self.test_loader is not None
         )
+
+    def _best_metric_key(self) -> str:
+        return str(self.config.get("eval", {}).get("best_metric", "recall@1"))
 
     def _ranking_on(self, loader: DataLoader) -> Dict[str, float]:
         return evaluate_ranking(
@@ -107,6 +126,8 @@ class AlternatingSURDTrainer:
     def warmup(self) -> None:
         """先只训推荐（Flashback），子集头先冻住。"""
         epochs = int(self.config["train"]["warmup_epochs"])
+        if epochs <= 0:
+            return
         for epoch in range(epochs):
             self.model.train()
             for p in self._subset_parameters():
@@ -274,8 +295,9 @@ class AlternatingSURDTrainer:
         for p in self._rec_parameters():
             p.requires_grad_(True)
 
-        lambda_u = float(self.config["train"]["lambda_u"])
-        lambda_s = float(self.config["train"]["lambda_s"])
+        use_surd = self._use_surd()
+        lambda_u = float(self.config["train"]["lambda_u"]) if use_surd else 0.0
+        lambda_s = float(self.config["train"]["lambda_s"]) if use_surd else 0.0
         totals = {"loss": 0.0, "rec": 0.0, "u": 0.0, "s": 0.0}
         n = 0
         for batch in tqdm(
@@ -284,9 +306,9 @@ class AlternatingSURDTrainer:
             leave=False,
         ):
             batch = batch.to(self.device)
-            out = self.model(batch, compute_subsets=True)
+            out = self.model(batch, compute_subsets=use_surd and self.weight_tensors is not None)
             loss_rec = recommendation_loss(out["rec_logits"], batch.target_poi_id)
-            if self.weight_tensors is None:
+            if (not use_surd) or self.weight_tensors is None:
                 loss_u = batch.target_poi_id.new_zeros(())
                 loss_s = batch.target_poi_id.new_zeros(())
             else:
@@ -316,24 +338,32 @@ class AlternatingSURDTrainer:
         return {k: v / max(n, 1) for k, v in totals.items()}
 
     def fit(self) -> Dict[str, Any]:
-        # 流程：warm-up → 首次估 SURD → 循环（训推荐；每隔几轮再估 SURD）
+        # 流程：warm-up →（可选）首次估 SURD → 循环训推荐；可选重估 SURD
         total_epochs = int(self.config["train"]["total_epochs"])
         refresh_every = int(self.config["train"]["surd_refresh_interval"])
+        use_surd = self._use_surd()
+        best_key = self._best_metric_key()
         print(
             log_block(
                 "train schedule",
                 [
                     f"warmup_epochs={self.config['train']['warmup_epochs']}  "
                     f"total_epochs={total_epochs}  "
-                    f"surd_refresh_every={refresh_every}  "
+                    f"use_surd={use_surd}  "
+                    f"surd_refresh_every={refresh_every if use_surd else 'n/a'}  "
                     f"subset_fit_epochs={self.config['train']['subset_fit_epochs']}",
+                    f"best_metric={best_key}  "
                     f"eval_every_epoch  val=yes  "
-                    f"test={'yes' if self._eval_test_every_epoch() else 'no'}",
+                    f"test={'yes' if self._eval_test_every_epoch() else 'no'}  "
+                    f"lr_milestones={list(self.config['train'].get('lr_milestones') or [])}",
                 ],
             )
         )
         self.warmup()
-        self.refresh_surd(tag="epoch_0000_init")
+        if use_surd:
+            self.refresh_surd(tag="epoch_0000_init")
+        else:
+            print("  SURD disabled — Flashback-only recommendation (lambda_u/s ignored).")
 
         for epoch in range(1, total_epochs + 1):
             train_stats = self.train_recommendation_epoch(epoch)
@@ -347,7 +377,12 @@ class AlternatingSURDTrainer:
                 record["test"] = test_metrics
             self.history.append(record)
 
-            score = val_metrics.get("recall@5", val_metrics.get("recall@1", 0.0))
+            score = float(
+                val_metrics.get(
+                    best_key,
+                    val_metrics.get("acc@1", val_metrics.get("recall@1", 0.0)),
+                )
+            )
             is_best = score >= self.best_val
             lines = [
                 f"train  {format_train_losses(train_stats)}",
@@ -356,7 +391,7 @@ class AlternatingSURDTrainer:
             if test_metrics is not None:
                 lines.append(f"test   {format_metrics(test_metrics)}")
             if is_best:
-                lines.append(f"★ new best (val R@5={float(score):.4f})")
+                lines.append(f"★ new best (val {best_key}={score:.4f})")
             print(log_block(epoch_title("epoch", epoch, total_epochs), lines))
 
             if is_best:
@@ -368,9 +403,11 @@ class AlternatingSURDTrainer:
                     meta={"epoch": epoch, "val": val_metrics, "test": test_metrics},
                 )
 
-            # 周期性重估 SURD 权重（EMA 平滑）
-            if epoch % refresh_every == 0 and epoch < total_epochs:
+            if use_surd and epoch % refresh_every == 0 and epoch < total_epochs:
                 self.refresh_surd(tag=f"epoch_{epoch:04d}")
+
+            if self.scheduler is not None:
+                self.scheduler.step()
 
         save_checkpoint(
             self.output_dir / "last.pt",
@@ -382,7 +419,7 @@ class AlternatingSURDTrainer:
         print(
             log_block(
                 "training finished",
-                [f"best_val_R@5={float(self.best_val):.4f}  output={self.output_dir}"],
+                [f"best_val_{best_key}={float(self.best_val):.4f}  output={self.output_dir}"],
             )
         )
         return {"best_val": self.best_val, "history": self.history}
