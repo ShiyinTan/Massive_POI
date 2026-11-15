@@ -22,9 +22,10 @@ from utils.log_format import (
 
 
 def save_model(model, optimizer, save_variable_list, run_args, argparse_dict):
-    """
-    Save the parameters of the model and the optimizer,
-    as well as some other variables such as step and learning_rate
+    """Save best-model checkpoint to disk (skipped unless run_args.save_checkpoint).
+
+    Default contents are weights-only (no optimizer) to avoid huge files.
+    Set run_args.checkpoint_contents to ``full`` to also store optimizer state.
     """
     with open(osp.join(run_args.log_path, 'config.json'), 'w') as fjson:
         for key, value in argparse_dict.items():
@@ -32,11 +33,20 @@ def save_model(model, optimizer, save_variable_list, run_args, argparse_dict):
                 argparse_dict[key] = value.numpy().tolist()
         json.dump(argparse_dict, fjson, indent=2, sort_keys=True)
 
-    torch.save({
+    if not getattr(run_args, 'save_checkpoint', False):
+        return
+
+    contents = getattr(run_args, 'checkpoint_contents', 'weights')
+    payload = {
         **save_variable_list,
         'model_state_dict': model.state_dict(),
-        'optimizer_state_dict': optimizer.state_dict()},
-        osp.join(run_args.save_path, 'checkpoint.pt')
+    }
+    if contents == 'full' and optimizer is not None:
+        payload['optimizer_state_dict'] = optimizer.state_dict()
+    torch.save(payload, osp.join(run_args.save_path, 'checkpoint.pt'))
+    logging.info(
+        f"[Training] Wrote {'full' if 'optimizer_state_dict' in payload else 'weights-only'} "
+        f"checkpoint → {osp.join(run_args.save_path, 'checkpoint.pt')}"
     )
 
 

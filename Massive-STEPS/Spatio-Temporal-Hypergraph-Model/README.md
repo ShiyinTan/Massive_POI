@@ -126,6 +126,8 @@ outputs/{dataset}_{model}_{YYYYMMDD_HHMMSS}/
 Example: `outputs/beijing_sthgcn_20261115_060500/results/beijing_sthgcn_20261115_060500_test_summary.md`.  
 `Acc@K` in logs/results is the same as code `Recall@K` (single-label next-POI). TensorBoard: `tensorboard --logdir outputs`.
 
+Checkpoints: **not written to disk by default** (`save_checkpoint: false`). Best weights are kept in memory for `do_test`. To persist a file, set `save_checkpoint: true` (weights-only) or `checkpoint_contents: full` for model+optimizer.
+
 | Dataset Name | Acc@1  | Acc@5  | Acc@10 | MRR    | #Parameters | Training Speed<br>(per epoch)|
 |--------------|--------|--------|--------|--------|-------------|------------------------------|
 | NYC          | 0.2734 | 0.5361 | 0.6244 | 0.3915 | 27,820,020  | 3m24s                        | 
