@@ -1,26 +1,20 @@
-# STHGCN sequential baseline inside surd_guided_poi (SURD off).
-# Ports SequentialTransformer knobs from
-# Massive-STEPS/Spatio-Temporal-Hypergraph-Model/conf/std_conf/beijing.yml
-# (seq_transformer_args + run_args), adapted to NextPOIBatch.
+# Full hypergraph STHGCN baseline (Massive-STEPS Spatio-Temporal-Hypergraph-Model).
+# Requires PyG stack: see requirements-sthgcn.txt
 #
-# Protocol aligned with upstream STHGCN Acc population:
-#   - eval.drop_unseen_user_poi: true  (= remove_unseen_user_poi)
-#   - eval last-only; train prefixes
-#   - same-split history before target
+# train.py routes backbone=sthgcn to NeighborSampler path (SURD off).
+# Official CSVs are materialized under
+#   Massive-STEPS/Spatio-Temporal-Hypergraph-Model/data/{city}/
+# then upstream preprocess + LBSNDataset + STHGCN.
 #
-# Massive-STEPS README Beijing Acc@1: STHGCN = 0.453 is the FULL hypergraph
-# model (torch_geometric). This config is the sequence adapter — Acc will not
-# match 0.453; use upstream run.py for the published hypergraph number.
+# Massive-STEPS README Beijing Acc@1: STHGCN = 0.453 (this path).
+# Deprecated local Transformer: model.backbone=sthgcn_seq (do not use for baselines).
 
 model:
   backbone: sthgcn
-  hidden_dim: 128
-  subset_hidden_dim: 128
-  dropout: 0.3
-  share_poi_embedding: true
-  sthgcn_num_layers: 2
-  sthgcn_num_heads: 2
-  sthgcn_ff_dim: 512
+  sthgcn_conf: std_conf/beijing.yml
+  # Optional neighbor sizes override, e.g. "50-30" for CPU smoke (default from yml: 400-240)
+  # sthgcn_sizes: null
+  share_poi_embedding: false
 
 data:
   max_history_len: 20
@@ -28,10 +22,13 @@ data:
 
 train:
   batch_size: 16
+  eval_batch_size: 64
   lr: 0.0001
-  weight_decay: 0.00001
+  weight_decay: 0.0
   warmup_epochs: 0
   total_epochs: 20
+  valid_steps: 200
+  max_steps: 100000
   use_surd: false
   lambda_u: 0.0
   lambda_s: 0.0

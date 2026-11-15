@@ -26,7 +26,7 @@ data:
   setting: transductive
 
 model:
-  # flashback | graph_flashback | sthgcn
+  # flashback | graph_flashback | sthgcn (full hypergraph) | sthgcn_seq (deprecated)
   backbone: flashback
   hidden_dim: 64
   poi_emb_dim: 64  # ignored when share_poi_embedding=true (backbone emb dim = hidden_dim)

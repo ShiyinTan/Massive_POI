@@ -1,6 +1,9 @@
 """Factory for configurable next-POI backbones.
 
-``model.backbone`` ∈ ``flashback | graph_flashback | sthgcn``.
+``model.backbone`` ∈ ``flashback | graph_flashback | sthgcn | sthgcn_seq``.
+
+- ``sthgcn`` — full Massive-STEPS hypergraph (PyG); use ``training/sthgcn_runner``.
+- ``sthgcn_seq`` — DEPRECATED local NextPOIBatch Transformer (not STHGCN).
 """
 
 from __future__ import annotations
@@ -12,10 +15,9 @@ from scipy.sparse import coo_matrix, csr_matrix
 from ..data.preprocessing import NextPOISample
 from .backbone_flashback import FlashbackBackbone
 from .backbone_graph_flashback import GraphFlashbackBackbone
-from .backbone_sthgcn import STHGCNBackbone
 from .graph_builders import resolve_graph_flashback_graphs
 
-SUPPORTED_BACKBONES = ("flashback", "graph_flashback", "sthgcn")
+SUPPORTED_BACKBONES = ("flashback", "graph_flashback", "sthgcn", "sthgcn_seq")
 
 
 def build_backbone(
@@ -41,6 +43,7 @@ def build_backbone(
     sthgcn_num_layers: int = 2,
     sthgcn_num_heads: int = 4,
     sthgcn_ff_dim: Optional[int] = None,
+    upstream_sthgcn: Any = None,
     **_: Any,
 ):
     key = str(name).strip().lower()
@@ -84,8 +87,25 @@ def build_backbone(
             use_spatial_graph=use_spatial_graph,
         )
 
-    # sthgcn
-    return STHGCNBackbone(
+    if key == "sthgcn":
+        # Full hypergraph — constructed in sthgcn_runner via prepare_sthgcn_pipeline.
+        from ..data.sthgcn_hypergraph import require_sthgcn_deps
+        from .backbone_sthgcn import HypergraphSTHGCNBackbone
+
+        require_sthgcn_deps()
+        if upstream_sthgcn is None:
+            raise ValueError(
+                "model.backbone=sthgcn is the full hypergraph path and cannot be "
+                "built from NextPOIBatch alone. Use scripts/train.py (auto-routes) "
+                "or training.sthgcn_runner.run_sthgcn_baseline. "
+                "Deprecated local Transformer: backbone=sthgcn_seq."
+            )
+        return HypergraphSTHGCNBackbone(upstream_sthgcn)
+
+    # Deprecated local seq adapter
+    from .backbone_sthgcn_seq import STHGCNSeqBackbone
+
+    return STHGCNSeqBackbone(
         num_pois=num_pois,
         num_users=num_users,
         hidden_dim=hidden_dim,

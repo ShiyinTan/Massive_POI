@@ -149,6 +149,19 @@ def main():
     output_dir.mkdir(parents=True, exist_ok=True)
     write_json(output_dir / "config_resolved.json", cfg)
 
+    # Full hypergraph STHGCN: NeighborSampler path (not NextPOIBatch / SURD).
+    backbone = str(cfg.get("model", {}).get("backbone", "flashback")).lower()
+    if backbone == "sthgcn":
+        from surd_guided_poi.training.sthgcn_runner import run_sthgcn_baseline
+
+        run_sthgcn_baseline(cfg, device=device, output_dir=output_dir)
+        return
+    if backbone == "sthgcn_seq":
+        print(
+            "WARNING: backbone=sthgcn_seq is DEPRECATED (local Transformer). "
+            "Use backbone=sthgcn for Massive-STEPS full hypergraph STHGCN."
+        )
+
     data_cfg = cfg["data"]
     city = data_cfg["city"]
     cache_dir = PKG_ROOT / data_cfg.get("cache_dir", "outputs/data_cache") / city

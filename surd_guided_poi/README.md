@@ -16,7 +16,7 @@ on observational data — not causal claims).
 | Split files | `{city}_checkins_{train,validation,test}.csv` (same as Flashback / GETNext) |
 | Split construction | `Massive-STEPS/src/create_next_poi_dataset.py` (trail-level, user-stratified) |
 | Coord fallback | Missing venue lat/lon ← city center (`Flashback/dataloader.py`) |
-| Recommendation backbones | `model.backbone`: `flashback` → `Massive-STEPS/Flashback`; `graph_flashback` → `Massive-STEPS/Graph-Flashback`; `sthgcn` → SequentialTransformer-style adapter (full hypergraph STHGCN needs PyG / upstream `run.py`) |
+| Recommendation backbones | `model.backbone`: `flashback` → `Massive-STEPS/Flashback`; `graph_flashback` → `Massive-STEPS/Graph-Flashback`; `sthgcn` → **full hypergraph** STHGCN (PyG; see `docs/STHGCN.md` / `requirements-sthgcn.txt`). Deprecated: `sthgcn_seq` local Transformer |
 
 ## Quick start
 
@@ -36,6 +36,7 @@ python scripts/train.py \
 python scripts/train.py \
   --config configs/base.yaml configs/dataset_beijing.yaml configs/model_graph_flashback.yaml \
   --data_dir /path/to/Beijing
+# Full hypergraph STHGCN (install requirements-sthgcn.txt first)
 python scripts/train.py \
   --config configs/base.yaml configs/dataset_beijing.yaml configs/model_sthgcn.yaml \
   --data_dir /path/to/Beijing
@@ -43,7 +44,8 @@ python scripts/train.py \
 python scripts/evaluate.py --checkpoint outputs/beijing/best.pt --data_dir /path/to/Beijing
 ```
 
-Baseline Acc protocol (last-only eval, STHGCN cold drop, hparams): [`docs/BASELINE_ONLY.md`](docs/BASELINE_ONLY.md).
+Baseline Acc protocol: [`docs/BASELINE_ONLY.md`](docs/BASELINE_ONLY.md).  
+Full STHGCN deps / NeighborSampler path: [`docs/STHGCN.md`](docs/STHGCN.md).
 
 Tests (repo root):
 
@@ -56,7 +58,7 @@ python -m pytest surd_guided_poi/tests -q
 | Item | Choice |
 |------|--------|
 | Data | Massive-STEPS official train/val/test CSVs |
-| Backbone | `model.backbone`: flashback / graph_flashback / sthgcn (shared last-step logits `[B,K]`) |
+| Backbone | `flashback` / `graph_flashback` → `NextPOIBatch` logits; `sthgcn` → hypergraph NeighborSampler path |
 | SURD sources | Q1 history / Q2 time / Q3 spatial side encoders |
 | SURD role | Detached U/S weights for auxiliary CE; no backprop through SURD |
 | Inference | Selected backbone only (no SURD lookup) |

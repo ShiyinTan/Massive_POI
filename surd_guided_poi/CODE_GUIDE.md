@@ -83,11 +83,12 @@ CSV 搜索顺序：`data.data_dir` → `Massive-STEPS/data/{city}/` → HF 缓�
 |------------------|----------|--------|
 | `flashback` | `Massive-STEPS/Flashback/` | `models/backbone_flashback.py` |
 | `graph_flashback` | `Massive-STEPS/Graph-Flashback/` | `models/backbone_graph_flashback.py`（`import_graph_flashback_network()` 避免与 Flashback 的 `network.py` 冲突） |
-| `sthgcn` | 序列适配器（见下） | `models/backbone_sthgcn.py` |
+| `sthgcn` | **完整超图** `Spatio-Temporal-Hypergraph-Model`（PyG） | `data/sthgcn_hypergraph.py` + `training/sthgcn_runner.py` |
+| `sthgcn_seq` | **已弃用** 本地 Transformer（勿当 baseline） | `models/backbone_sthgcn_seq.py` |
 
 Flashback：先 `add_flashback_dir_to_sys_path()`，再 `from network import Flashback`。  
 Graph-Flashback：可选 `model.transition_pkl` / `model.interact_pkl`；缺省时用 official-train 样本计数构图（`graph_builders.py`）。  
-STHGCN：**完整超图** STHGCN 依赖 `torch_geometric` + NeighborSampler，与本目录 `NextPOIBatch` 不直接兼容；此处挂的是同仓库 **SequentialTransformer** 思路的序列 Transformer 基线。完整超图请跑 `Massive-STEPS/Spatio-Temporal-Hypergraph-Model/run.py`。
+STHGCN：`backbone=sthgcn` 走完整超图（`docs/STHGCN.md`，需 `requirements-sthgcn.txt`）。`sthgcn_seq` 已弃用。
 
 ### 3.2 预处理约定（对齐 Flashback）
 
@@ -140,7 +141,8 @@ model:
 |------|----------|
 | `flashback` | 官方 Flashback RNN + 时空衰减 |
 | `graph_flashback` | 官方 Graph-Flashback（转移图 GCN + 用户–POI 交互）；无 pkl 则用 train 计数图 |
-| `sthgcn` | POI/时间 embedding + TransformerEncoder + 线性头（序列基线） |
+| `sthgcn` | 完整超图 NeighborSampler + `STHGCN`（PyG；SURD 暂不支持） |
+| `sthgcn_seq` | 已弃用本地序列 Transformer |
 
 推理路径：`SURDGuidedPOIModel.recommend` → **只走所选骨干**，不查真实标签权重。
 
@@ -240,5 +242,5 @@ beijing_checkins_test.csv
 
 **仍延后**
 
-- GETNext；完整超图 STHGCN（PyG）直接吃 `NextPOIBatch`  
+- GETNext；SURD 挂在完整超图 STHGCN 上  
 - Q4 进入 SURD、candidate-conditioned 推理、R 正则、大规模消融、inductive cold-start  
