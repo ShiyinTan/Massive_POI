@@ -62,6 +62,8 @@ def resolve_output_dir(raw: str | Path) -> Path:
 
 
 def build_split_samples(frame, vocab, split_name: str, data_cfg: dict):
+    # 每个 split 单独建样本：序列 history = 该 CSV 内同 trail 前缀（无跨 split dump）。
+    # user_history_df=frame → 6 维 user_features 也只看本 split 且 timestamp < target。
     return build_samples_from_split(
         frame,
         vocab,
@@ -207,6 +209,7 @@ def main():
         model=model,
         train_loader=loaders["train"],
         val_loader=loaders["val"],
+        test_loader=loaders["test"],  # 每 epoch 可选打 test（见 eval.eval_test_every_epoch）
         estimator_fit_loader=loaders["estimator_fit"],
         estimation_loader=loaders["estimation"],  # 来自 carve 的 holdout
         poi_prior=poi_prior,

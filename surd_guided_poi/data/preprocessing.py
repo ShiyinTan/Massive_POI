@@ -332,9 +332,21 @@ def build_samples_from_split(
     use_all_prefixes: bool = True,
     user_history_df: Optional[pd.DataFrame] = None,
 ) -> List[NextPOISample]:
-    """CSV rows → list[NextPOISample] for one official split.
+    """CSV rows → list[NextPOISample] for **one** official split.
 
     Grouping / 分组: ``groupby([user_id, trail_id])`` (same as Flashback).
+
+    无未来泄漏 / history 从哪来
+    -----------------------------
+    - **序列历史**（``history_poi_ids`` / 坐标 / 时间特征 / Flashback 输入）
+      **只**取自本函数的 ``df``（即该 split 的官方 CSV），且仅限**同一 trail**
+      上目标时刻之前的前缀 ``[hist_start:t]``。
+    - **不会**把 train+val+test 拼成一条长历史；val/test 样本看不到
+      其他 split 里的 check-in 序列。
+    - ``user_history_df`` **只**用于 6 维 ``user_features`` 聚合，且内部仍
+      ``timestamp < target``；默认 ``train.py`` 传入的是**同一 split 的 frame**。
+    - Transductive 仅指词表 ``poi2idx`` 在 train+val+test 上共建，**不是**
+      把全库 dump 当 history。
 
     Length rules / 长度规则（默认 config）::
 
@@ -351,6 +363,7 @@ def build_samples_from_split(
     """
     samples: List[NextPOISample] = []
     sid = 0
+    # 仅给 user_features；序列 history 永远来自下面的 trail 前缀（本 df）
     history_source = df if user_history_df is None else user_history_df
     user_groups = {u: g for u, g in history_source.groupby("user_id", sort=False)}
 
@@ -371,6 +384,7 @@ def build_samples_from_split(
         targets = range(min_history_len, len(g)) if use_all_prefixes else [len(g) - 1]
         for t in targets:
             hist_start = max(0, t - max_history_len)  # 只保留最近 max_history_len 步
+            # 严格：同 trail、目标下标 t 之前；不含 t 及以后（无未来泄漏）
             hist_pois = poi_ids[hist_start:t]
             hist_ts = ts_list[hist_start:t]
             hist_unix = unix[hist_start:t]

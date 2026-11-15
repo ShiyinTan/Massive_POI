@@ -90,6 +90,13 @@ CSV 搜索顺序：`data.data_dir` → `Massive-STEPS/data/{city}/` → HF 缓�
 - 词表：train+val+test 上 **transductive** 构建 `poi2id` / `user2id`（同 Flashback）
 - 时间：为 Flashback 核函数提供 **unix 秒**（`timestamp` → `int64 ns // 10**9`）
 
+**Eval / val / test 的 history 从哪来（无未来泄漏）**
+
+- 每个 split **单独**调用 `build_samples_from_split(frames[split], …)`。
+- 一条样本的序列历史 = **该 split CSV 内、同一 trail、目标时刻之前的前缀**；不会把 train+val+test 拼成 history。
+- Flashback / Q1–Q3 只吃这条样本自己的 history 张量；`user_features` 也只看 `timestamp < target`（默认同一 split）。
+- Transductive 只影响「词表里有没有这个 POI id」，不把别的 split 的打卡塞进序列。
+
 **关于「序列长度 < 20」：** 本目录默认路径 **不会** 按用户总打卡数 <20 过滤。  
 `configs/base.yaml` 里的 `max_history_len: 20` 只是把每条样本的 **history 截断到最近 20 步**；`min_history_len: 1` 只要求每条 trail 至少能切出「1 个历史 + 1 个目标」。  
 上游 Flashback CLI（`Massive-STEPS/Flashback/setting.py`）会设 `sequence_length=20` 且 `min_checkins=sequence_length+1`，那是他们自己的训练入口；我们的 `train.py` 走的是 `load_official_split_frames`，可选 helper `load_flashback_poi_dataloader(..., min_checkins=0)` 默认也不开该过滤。

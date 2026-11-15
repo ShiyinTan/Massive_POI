@@ -34,6 +34,7 @@ def _config_paths(args_config: list[str]) -> list[Path]:
 
 
 def _samples(frame, vocab, split: str, data_cfg: dict):
+    # History = this split CSV only, same-trail prefixes before the target (no dump leak).
     return build_samples_from_split(
         frame,
         vocab,
@@ -41,6 +42,7 @@ def _samples(frame, vocab, split: str, data_cfg: dict):
         max_history_len=int(data_cfg["max_history_len"]),
         min_history_len=int(data_cfg["min_history_len"]),
         use_all_prefixes=bool(data_cfg["use_all_prefixes"]),
+        user_history_df=frame,
     )
 
 
