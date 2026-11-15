@@ -9,6 +9,7 @@ data:
   split_protocol: massive_steps_official
 
 train:
+  # Overridden by model_*_aligned YAMLs (Flashback/GF beijing → 10).
   batch_size: 64
   warmup_epochs: 0
   total_epochs: 100

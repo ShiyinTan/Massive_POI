@@ -363,7 +363,7 @@ class AlternatingSURDTrainer:
         if use_surd:
             self.refresh_surd(tag="epoch_0000_init")
         else:
-            print("  SURD disabled — Flashback-only recommendation (lambda_u/s ignored).")
+            print("  SURD disabled — backbone-only recommendation (lambda_u/s ignored).")
 
         for epoch in range(1, total_epochs + 1):
             train_stats = self.train_recommendation_epoch(epoch)

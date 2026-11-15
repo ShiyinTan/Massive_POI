@@ -86,4 +86,7 @@ eval:
   # Massive-STEPS Flashback Acc@1 协议：val/test 只评每条 trail 的最后一站
   # （train 仍可用 data.use_all_prefixes=true）。Acc@1 ≡ recall@1。
   use_all_prefixes: false
+  # STHGCN remove_unseen_user_poi: drop val/test if user or target POI not in train.
+  # Flashback / Graph-Flashback keep false. If unset: backbone=sthgcn -> true.
+  drop_unseen_user_poi: false
   best_metric: recall@1

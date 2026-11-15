@@ -21,6 +21,10 @@ REPO_ROOT = PKG_ROOT.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from surd_guided_poi.data.cold_filter import (
+    maybe_drop_unseen_user_poi,
+    seen_user_poi_ids_from_train_frame,
+)
 from surd_guided_poi.data.dataset import NextPOIDataset, collate_next_poi
 from surd_guided_poi.data.massive_steps import load_official_split_frames, resolve_official_splits
 from surd_guided_poi.data.preprocessing import (
@@ -36,6 +40,17 @@ from surd_guided_poi.training.alternating import AlternatingSURDTrainer
 from surd_guided_poi.training.checkpoint import load_checkpoint, write_json
 from surd_guided_poi.training.config import load_config
 from surd_guided_poi.training.log_format import format_metrics, log_block
+
+
+def drop_unseen_user_poi_enabled(cfg: dict) -> bool:
+    """STHGCN-style cold filter; Flashback/Graph-Flashback leave this off."""
+    eval_cfg = cfg.get("eval") or {}
+    data_cfg = cfg.get("data") or {}
+    if "drop_unseen_user_poi" in eval_cfg:
+        return bool(eval_cfg["drop_unseen_user_poi"])
+    if "drop_unseen_user_poi" in data_cfg:
+        return bool(data_cfg["drop_unseen_user_poi"])
+    return str(cfg.get("model", {}).get("backbone", "flashback")).lower() == "sthgcn"
 
 
 def set_seed(seed: int) -> None:
@@ -157,6 +172,7 @@ def main():
     eval_cfg = cfg.get("eval", {})
     # Train: all prefixes (default). Val/test: last-POI-only for Massive-STEPS Acc@1 parity.
     eval_prefixes = bool(eval_cfg.get("use_all_prefixes", False))
+    drop_cold = drop_unseen_user_poi_enabled(cfg)
     train_samples = build_split_samples(frames["train"], vocab, "train", data_cfg)
     val_samples = build_split_samples(
         frames["val"], vocab, "val", data_cfg, use_all_prefixes=eval_prefixes
@@ -164,8 +180,17 @@ def main():
     test_samples = build_split_samples(
         frames["test"], vocab, "test", data_cfg, use_all_prefixes=eval_prefixes
     )
+    n_val_before, n_test_before = len(val_samples), len(test_samples)
+    train_users, train_pois = seen_user_poi_ids_from_train_frame(frames["train"], vocab)
+    val_samples = maybe_drop_unseen_user_poi(
+        val_samples, train_user_ids=train_users, train_poi_ids=train_pois, enabled=drop_cold
+    )
+    test_samples = maybe_drop_unseen_user_poi(
+        test_samples, train_user_ids=train_users, train_poi_ids=train_pois, enabled=drop_cold
+    )
 
     # carve：train 内再切 — model_train 训推荐；estimation 只给 Phase A 估 SURD
+    # Baseline-only (use_surd=false): holdout still carved but Phase A is skipped.
     model_train, estimation = carve_estimator_holdout(
         train_samples, holdout_ratio=float(data_cfg["estimator_holdout_ratio"])
     )
@@ -185,6 +210,11 @@ def main():
             "n_estimation": len(estimation),
             "n_val": len(val_samples),
             "n_test": len(test_samples),
+            "n_val_before_cold_filter": n_val_before,
+            "n_test_before_cold_filter": n_test_before,
+            "drop_unseen_user_poi": drop_cold,
+            "eval_use_all_prefixes": eval_prefixes,
+            "use_surd": bool(cfg.get("train", {}).get("use_surd", True)),
             "setting": data_cfg.get("setting", "transductive"),
             "train_counts": train_counts.tolist(),  # 原始 N_y，不是 prior
         },
@@ -198,6 +228,7 @@ def main():
                 f"val={len(val_samples)}  test={len(test_samples)}",
                 f"train_prefixes={bool(data_cfg.get('use_all_prefixes', True))}  "
                 f"eval_prefixes={eval_prefixes}  "
+                f"drop_cold={drop_cold}  "
                 f"use_surd={bool(cfg.get('train', {}).get('use_surd', True))}  "
                 f"backbone={cfg.get('model', {}).get('backbone', 'flashback')}  "
                 f"rnn={cfg.get('model', {}).get('rnn_type')}  "
