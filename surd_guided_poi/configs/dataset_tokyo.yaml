@@ -8,8 +8,8 @@ data:
 
 train:
   batch_size: 64
-  warmup_epochs: 2
-  total_epochs: 10
-  surd_refresh_interval: 3
+  warmup_epochs: 5
+  total_epochs: 40
+  surd_refresh_interval: 5
 
 output_dir: outputs/tokyo
