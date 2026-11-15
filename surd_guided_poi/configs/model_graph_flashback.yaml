@@ -1,0 +1,48 @@
+# Graph-Flashback baseline (Massive-STEPS/Graph-Flashback) inside surd_guided_poi.
+# Builds count-based transition / interact graphs from official train unless
+# transition_pkl / interact_pkl point at KGE pickles.
+#
+# Massive-STEPS README Beijing Acc@1: Graph-Flashback = 0.304 (vs Flashback 0.278).
+
+model:
+  backbone: graph_flashback
+  hidden_dim: 10
+  subset_hidden_dim: 10
+  rnn_type: rnn
+  dropout: 0.0
+  lambda_t: 0.1
+  lambda_s: 100.0
+  lambda_loc: 1.0
+  lambda_user: 1.0
+  use_weight: false
+  use_graph_user: false
+  use_spatial_graph: false
+  share_poi_embedding: true
+  # Optional Massive-STEPS KGE graph pickles (same shapes as Graph-Flashback train.py):
+  # transition_pkl: /path/to/poi_transition.pkl
+  # interact_pkl: /path/to/user_poi_interact.pkl
+
+data:
+  max_history_len: 20
+  use_all_prefixes: true
+
+train:
+  batch_size: 64
+  lr: 0.01
+  weight_decay: 0.0
+  warmup_epochs: 0
+  total_epochs: 100
+  lr_milestones: [20, 40, 60, 80]
+  lr_gamma: 0.2
+  use_surd: false
+  lambda_u: 0.0
+  lambda_s: 0.0
+  surd_refresh_interval: 1000
+  subset_fit_epochs: 1
+  grad_clip: 5.0
+
+eval:
+  use_all_prefixes: false
+  best_metric: recall@1
+  eval_test_every_epoch: true
+  ks: [1, 5, 10]

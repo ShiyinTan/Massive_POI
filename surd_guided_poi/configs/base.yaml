@@ -26,17 +26,30 @@ data:
   setting: transductive
 
 model:
+  # flashback | graph_flashback | sthgcn
   backbone: flashback
   hidden_dim: 64
-  poi_emb_dim: 64  # ignored when share_poi_embedding=true (Flashback emb dim = hidden_dim)
+  poi_emb_dim: 64  # ignored when share_poi_embedding=true (backbone emb dim = hidden_dim)
   num_layers_history: 1
   dropout: 0.1
   subset_hidden_dim: 64
   rnn_type: gru
-  # Flashback spatiotemporal decay (Massive-STEPS/Flashback defaults)
+  # Flashback / Graph-Flashback spatiotemporal decay
   lambda_t: 0.1
   lambda_s: 100.0
   share_poi_embedding: true
+  # Graph-Flashback: optional KGE pkls; else count-graphs from official train
+  # transition_pkl: null
+  # interact_pkl: null
+  lambda_loc: 1.0
+  lambda_user: 1.0
+  use_weight: false
+  use_graph_user: false
+  use_spatial_graph: false
+  # STHGCN sequential Transformer (NextPOIBatch adapter; full hypergraph needs PyG)
+  sthgcn_num_layers: 2
+  sthgcn_num_heads: 4
+  # sthgcn_ff_dim: null  # default max(128, 2*hidden_dim)
 
 train:
   batch_size: 64
