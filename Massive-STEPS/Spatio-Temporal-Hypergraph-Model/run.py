@@ -167,6 +167,9 @@ if __name__ == '__main__':
         logging.info(f'[Training] Parameter {name}: {param.size()}, require_grad = {param.requires_grad}')
     logging.info(f'[Training] #Parameters: {count_parameters(model)}')
 
+    # Best weights for do_test when disk checkpointing is disabled (default).
+    best_checkpoint = None
+
     if cfg.run_args.do_train:
         current_learning_rate = cfg.run_args.learning_rate
         optimizer = torch.optim.Adam(
@@ -193,11 +196,24 @@ if __name__ == '__main__':
             warm_up_steps = checkpoint['warm_up_steps']
             cooldown_rate = checkpoint['cooldown_rate']
             sizes = checkpoint['sizes']
-            optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+            if 'optimizer_state_dict' in checkpoint:
+                optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+            else:
+                logging.info('[Training] Weights-only checkpoint — optimizer freshly initialized')
         else:
             logging.info(f'[Training] Randomly Initializing Model...')
             init_step = 0
         step = init_step
+
+        # Disk checkpoints are off by default (too large); keep best weights in RAM for test.
+        save_checkpoint = bool(getattr(cfg.run_args, 'save_checkpoint', False))
+        checkpoint_contents = getattr(cfg.run_args, 'checkpoint_contents', 'weights')
+        cfg.run_args.save_checkpoint = save_checkpoint
+        cfg.run_args.checkpoint_contents = checkpoint_contents
+        logging.info(
+            f'[Training] Checkpoint disk save: {save_checkpoint} '
+            f'(contents={checkpoint_contents}; best-only when enabled)'
+        )
 
         # Set valid dataloader as it would be evaluated during training
         logging.info(f'[Training] Initial learning rate: {current_learning_rate}')
@@ -263,7 +279,7 @@ if __name__ == '__main__':
 
                     metrics = 4 * recall_res[1] + recall_res[20]
 
-                    # save model based on compositional recall metrics
+                    # keep / optionally persist best-only weights (not every step)
                     if metrics > best_metrics:
                         save_variable_list = {
                             'step': global_step,
@@ -272,8 +288,16 @@ if __name__ == '__main__':
                             'cooldown_rate': cfg.run_args.cooldown_rate,
                             'sizes': sizes
                         }
+                        # CPU copy avoids pinning a large GPU tensor graph in RAM
+                        best_checkpoint = {
+                            **save_variable_list,
+                            'model_state_dict': {
+                                k: v.detach().cpu().clone() for k, v in model.state_dict().items()
+                            },
+                        }
                         logging.info(
-                            f'[Training] Best valid so far — save checkpoint  '
+                            f'[Training] Best valid so far — keep weights'
+                            f'{" + write disk" if save_checkpoint else " (no disk)"}  '
                             f'epoch={eph + 1} step={global_step}  '
                             + format_metrics_line(recall_res, mrr_res)
                         )
@@ -301,7 +325,18 @@ if __name__ == '__main__':
     if cfg.run_args.do_test:
         logging.info('[Evaluating] Test set (best checkpoint)...')
 
-        checkpoint = torch.load(osp.join(cfg.run_args.save_path, 'checkpoint.pt'))
+        ckpt_path = osp.join(cfg.run_args.save_path, 'checkpoint.pt')
+        if best_checkpoint is not None:
+            checkpoint = best_checkpoint
+            logging.info('[Evaluating] Loading best weights from memory')
+        elif osp.isfile(ckpt_path):
+            checkpoint = torch.load(ckpt_path)
+            logging.info(f'[Evaluating] Loading best weights from {ckpt_path}')
+        else:
+            raise FileNotFoundError(
+                f'No best checkpoint in memory or at {ckpt_path}. '
+                'Train with do_validate, or set save_checkpoint: true / provide init_checkpoint.'
+            )
         model.load_state_dict(checkpoint['model_state_dict'])
         recall_res, ndcg_res, map_res, mrr_res, loss = test_step(
             model, sampler_test, split='test', step=checkpoint.get('step')
