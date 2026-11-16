@@ -11,6 +11,30 @@
 
 > SURD 结果是观测 check-in 上的 **predictive information structure（预测信息结构）**，不要直接说成因果效应。
 
+### 流水线一览（flowchart）
+
+同内容的 Google Slides 版：[SURD-guided POI pipeline](https://docs.google.com/presentation/d/19N61-3lvPxcqaZ4oO3GtDL0WnKINfg-GmmcOJXij2qk/edit)。
+
+```mermaid
+flowchart TD
+  A["官方 CSV<br/>train / val / test"] --> B["NextPOISample<br/>同 trail 前缀 history"]
+  B --> C["NextPOIBatch"]
+  C --> D["backbone<br/>flashback / graph_flashback"]
+  C --> E["Q1 History"]
+  C --> F["Q2 Temporal"]
+  C --> G["Q3 Spatial"]
+  D --> H["rec_logits → L_rec"]
+  E --> I["7 子集头<br/>P(Y | Q_A)"]
+  F --> I
+  G --> I
+  I --> J["Specific MI"]
+  J --> K["SURD → R / U / S"]
+  K --> L["冻结权重 → L_U / L_S"]
+  H --> M["总损失<br/>L_rec + λ_U L_U + λ_S L_S"]
+  L --> M
+  D --> N["推理：仅所选骨干<br/>recommend()"]
+```
+
 ---
 
 ## 1. 和上一版（from-scratch）比，改了什么？
@@ -150,19 +174,9 @@ model:
 
 ## 5. SURD 如何“包”在骨干外面？
 
-```text
-Massive-STEPS official batch
-        │
-        ├──────────────────────────────► backbone (flashback|graph_flashback)
-        │                                         └──► rec_logits  (= L_rec)
-        ├─ Q1 HistoryEncoder (可共享骨干 POI emb)
-        ├─ Q2 TemporalEncoder (历史时间序列 + 目标时刻 → 融合)
-        └─ Q3 SpatialEncoder  (历史空间序列 + 12 维汇总 → 融合)
-                 │
-                 └─ 7 个子集概率头 → Specific MI → SURD assign
-                         │
-                         └─ 冻结的 U/S 权重 → L_U / L_S（辅助监督）
-```
+详见文首 [流水线一览](#流水线一览flowchart)（Mermaid）与 [Google Slides](https://docs.google.com/presentation/d/19N61-3lvPxcqaZ4oO3GtDL0WnKINfg-GmmcOJXij2qk/edit)。
+
+要点：batch 一边进所选骨干（`flashback` / `graph_flashback` → `L_rec`），一边进 Q1/Q2/Q3 → 子集头 → Specific MI → SURD U/S 权重（`detach`）→ `L_U` / `L_S`；推理只用所选骨干。
 
 总损失（规格第 6.4 节）：
 
