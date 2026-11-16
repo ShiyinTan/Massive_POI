@@ -3,14 +3,20 @@ data:
   hf_dataset_id: CRUISEResearchGroup/Massive-STEPS-Beijing
   # Optional local override, e.g. /tmp/massive-steps-data/Beijing
   data_dir: null
-  max_history_len: 50
+  # Prefer model_flashback_aligned.yaml for Massive-STEPS Flashback parity.
+  max_history_len: 20
   use_all_prefixes: true
   split_protocol: massive_steps_official
 
 train:
-  batch_size: 32
-  warmup_epochs: 3
-  total_epochs: 30
-  surd_refresh_interval: 5
+  # Overridden by model_*_aligned YAMLs (Flashback/GF beijing → 10).
+  batch_size: 64
+  warmup_epochs: 0
+  total_epochs: 100
+  surd_refresh_interval: 1000
+
+eval:
+  use_all_prefixes: false
+  best_metric: recall@1
 
 output_dir: outputs/beijing

@@ -15,6 +15,10 @@ REPO_ROOT = PKG_ROOT.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from surd_guided_poi.data.cold_filter import (
+    maybe_drop_unseen_user_poi,
+    seen_user_poi_ids_from_train_frame,
+)
 from surd_guided_poi.data.dataset import NextPOIDataset, collate_next_poi
 from surd_guided_poi.data.massive_steps import load_official_split_frames
 from surd_guided_poi.data.preprocessing import (
@@ -24,41 +28,38 @@ from surd_guided_poi.data.preprocessing import (
 )
 from surd_guided_poi.evaluation.long_tail_metrics import evaluate_by_frequency, frequency_buckets
 from surd_guided_poi.evaluation.ranking_metrics import evaluate_ranking
-from surd_guided_poi.models.full_model import SURDGuidedPOIModel
+from surd_guided_poi.models.full_model import build_surd_model
 from surd_guided_poi.training.checkpoint import load_checkpoint, write_json
 from surd_guided_poi.training.config import load_config
+
+
+def drop_unseen_user_poi_enabled(cfg: dict) -> bool:
+    eval_cfg = cfg.get("eval") or {}
+    data_cfg = cfg.get("data") or {}
+    if "drop_unseen_user_poi" in eval_cfg:
+        return bool(eval_cfg["drop_unseen_user_poi"])
+    if "drop_unseen_user_poi" in data_cfg:
+        return bool(data_cfg["drop_unseen_user_poi"])
+    return False
 
 
 def _config_paths(args_config: list[str]) -> list[Path]:
     return [Path(c) if Path(c).is_file() else PKG_ROOT / c for c in args_config]
 
 
-def _samples(frame, vocab, split: str, data_cfg: dict):
+def _samples(frame, vocab, split: str, data_cfg: dict, eval_cfg: dict | None = None):
     # History = this split CSV only, same-trail prefixes before the target (no dump leak).
+    # Default eval: last POI of each trail (Massive-STEPS Flashback Acc@1).
+    eval_cfg = eval_cfg or {}
+    prefixes = bool(eval_cfg.get("use_all_prefixes", data_cfg.get("use_all_prefixes", False)))
     return build_samples_from_split(
         frame,
         vocab,
         split,
         max_history_len=int(data_cfg["max_history_len"]),
         min_history_len=int(data_cfg["min_history_len"]),
-        use_all_prefixes=bool(data_cfg["use_all_prefixes"]),
+        use_all_prefixes=prefixes,
         user_history_df=frame,
-    )
-
-
-def _build_model(vocab, model_cfg: dict) -> SURDGuidedPOIModel:
-    hidden = int(model_cfg["hidden_dim"])
-    return SURDGuidedPOIModel(
-        num_pois=vocab.num_pois,
-        num_users=vocab.num_users,
-        hidden_dim=hidden,
-        poi_emb_dim=int(model_cfg.get("poi_emb_dim", hidden)),
-        subset_hidden_dim=int(model_cfg.get("subset_hidden_dim", hidden)),
-        dropout=float(model_cfg.get("dropout", 0.1)),
-        rnn_type=str(model_cfg.get("rnn_type", "gru")),
-        lambda_t=float(model_cfg.get("lambda_t", 0.1)),
-        lambda_s=float(model_cfg.get("lambda_s", 100.0)),
-        share_poi_embedding=bool(model_cfg.get("share_poi_embedding", True)),
     )
 
 
@@ -93,12 +94,23 @@ def main():
         hf_dataset_id=data_cfg.get("hf_dataset_id"),
     )
     vocab = build_vocab_from_frames(frames)
-    train_samples = _samples(frames["train"], vocab, "train", data_cfg)
-    test_samples = _samples(frames["test"], vocab, "test", data_cfg)
+    eval_cfg = cfg.get("eval", {})
+    drop_cold = drop_unseen_user_poi_enabled(cfg)
+    # Graphs for graph_flashback: rebuild from train with all prefixes (match train.py).
+    train_samples_for_graphs = _samples(
+        frames["train"], vocab, "train", data_cfg, {"use_all_prefixes": True}
+    )
+    test_samples = _samples(frames["test"], vocab, "test", data_cfg, eval_cfg)
+    train_users, train_pois = seen_user_poi_ids_from_train_frame(frames["train"], vocab)
+    test_samples = maybe_drop_unseen_user_poi(
+        test_samples, train_user_ids=train_users, train_poi_ids=train_pois, enabled=drop_cold
+    )
     # 长尾分桶要用整数 N_y，不能用归一化的 prior
-    train_counts = poi_sample_counts(train_samples, vocab.num_pois)
+    train_counts = poi_sample_counts(train_samples_for_graphs, vocab.num_pois)
 
-    model = _build_model(vocab, cfg["model"])
+    model = build_surd_model(
+        vocab, cfg["model"], train_samples=train_samples_for_graphs
+    )
     load_checkpoint(args.checkpoint, model, map_location=device)
     model.to(device)
 
@@ -126,6 +138,9 @@ def main():
         "ranking": metrics,
         "long_tail": long_tail,
         "split_protocol": "massive_steps_official",
+        "drop_unseen_user_poi": drop_cold,
+        "n_test": len(test_samples),
+        "backbone": str(cfg.get("model", {}).get("backbone", "flashback")),
         "device": str(device),
     }
     out = Path(args.output_json)

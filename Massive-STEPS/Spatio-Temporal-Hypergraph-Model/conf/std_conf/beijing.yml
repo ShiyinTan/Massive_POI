@@ -60,4 +60,8 @@ run_args:
   epoch: 20
   valid_steps: 200
   num_workers: 4
+  # Disk checkpoints are large; default is off (best weights kept in RAM for do_test).
+  # Set save_checkpoint: true and optionally checkpoint_contents: full to resume later.
+  save_checkpoint: false
+  checkpoint_contents: weights
   init_checkpoint:

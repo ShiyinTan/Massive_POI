@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Train SURD-guided next-POI on Massive-STEPS official splits + Flashback backbone."""
+"""Train SURD-guided next-POI on Massive-STEPS official splits.
+
+Backbone selected by ``model.backbone``: flashback | graph_flashback.
+(STHGCN: use Massive-STEPS/Spatio-Temporal-Hypergraph-Model directly.)
+"""
 
 from __future__ import annotations
 
@@ -18,6 +22,10 @@ REPO_ROOT = PKG_ROOT.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from surd_guided_poi.data.cold_filter import (
+    maybe_drop_unseen_user_poi,
+    seen_user_poi_ids_from_train_frame,
+)
 from surd_guided_poi.data.dataset import NextPOIDataset, collate_next_poi
 from surd_guided_poi.data.massive_steps import load_official_split_frames, resolve_official_splits
 from surd_guided_poi.data.preprocessing import (
@@ -28,11 +36,22 @@ from surd_guided_poi.data.preprocessing import (
 )
 from surd_guided_poi.data.splits import assert_official_split_disjoint_trails, carve_estimator_holdout
 from surd_guided_poi.evaluation.ranking_metrics import evaluate_ranking
-from surd_guided_poi.models.full_model import SURDGuidedPOIModel
+from surd_guided_poi.models.full_model import build_surd_model
 from surd_guided_poi.training.alternating import AlternatingSURDTrainer
 from surd_guided_poi.training.checkpoint import load_checkpoint, write_json
 from surd_guided_poi.training.config import load_config
 from surd_guided_poi.training.log_format import format_metrics, log_block
+
+
+def drop_unseen_user_poi_enabled(cfg: dict) -> bool:
+    """Optional cold filter; Flashback/Graph-Flashback leave this off by default."""
+    eval_cfg = cfg.get("eval") or {}
+    data_cfg = cfg.get("data") or {}
+    if "drop_unseen_user_poi" in eval_cfg:
+        return bool(eval_cfg["drop_unseen_user_poi"])
+    if "drop_unseen_user_poi" in data_cfg:
+        return bool(data_cfg["drop_unseen_user_poi"])
+    return False
 
 
 def set_seed(seed: int) -> None:
@@ -61,16 +80,27 @@ def resolve_output_dir(raw: str | Path) -> Path:
     return PKG_ROOT / output_dir
 
 
-def build_split_samples(frame, vocab, split_name: str, data_cfg: dict):
+def build_split_samples(
+    frame,
+    vocab,
+    split_name: str,
+    data_cfg: dict,
+    *,
+    use_all_prefixes: bool | None = None,
+):
     # 每个 split 单独建样本：序列 history = 该 CSV 内同 trail 前缀（无跨 split dump）。
     # user_history_df=frame → 6 维 user_features 也只看本 split 且 timestamp < target。
+    # val/test: prefer eval.use_all_prefixes=false (last POI only = Massive-STEPS Acc@1).
+    prefixes = (
+        bool(data_cfg["use_all_prefixes"]) if use_all_prefixes is None else bool(use_all_prefixes)
+    )
     return build_samples_from_split(
         frame,
         vocab,
         split_name,
         max_history_len=int(data_cfg["max_history_len"]),
         min_history_len=int(data_cfg["min_history_len"]),
-        use_all_prefixes=bool(data_cfg["use_all_prefixes"]),
+        use_all_prefixes=prefixes,
         user_history_df=frame,
     )
 
@@ -88,29 +118,17 @@ def build_loaders(samples_dict, batch_size, num_workers):
     return loaders
 
 
-def build_model(vocab, model_cfg: dict) -> SURDGuidedPOIModel:
-    hidden = int(model_cfg["hidden_dim"])
-    return SURDGuidedPOIModel(
-        num_pois=vocab.num_pois,
-        num_users=vocab.num_users,
-        hidden_dim=hidden,
-        poi_emb_dim=int(model_cfg.get("poi_emb_dim", hidden)),
-        num_layers_history=int(model_cfg.get("num_layers_history", 1)),
-        subset_hidden_dim=int(model_cfg.get("subset_hidden_dim", hidden)),
-        dropout=float(model_cfg.get("dropout", 0.1)),
-        rnn_type=str(model_cfg.get("rnn_type", "gru")),
-        lambda_t=float(model_cfg.get("lambda_t", 0.1)),
-        lambda_s=float(model_cfg.get("lambda_s", 100.0)),
-        share_poi_embedding=bool(model_cfg.get("share_poi_embedding", True)),
-    )
-
-
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--config",
         nargs="+",
-        default=["configs/base.yaml", "configs/dataset_beijing.yaml", "configs/model_surd.yaml"],
+        default=[
+            "configs/base.yaml",
+            "configs/dataset_beijing.yaml",
+            "configs/model_flashback_aligned.yaml",
+        ],
+        help="Default: Flashback-aligned Beijing (SURD off). Use model_surd.yaml to enable SURD.",
     )
     parser.add_argument("--data_dir", default=None, help="Directory with official Massive-STEPS split CSVs")
     parser.add_argument("--output_dir", default=None)
@@ -152,11 +170,28 @@ def main():
     assert_official_split_disjoint_trails(frames)
     vocab = build_vocab_from_frames(frames)
 
+    eval_cfg = cfg.get("eval", {})
+    # Train: all prefixes (default). Val/test: last-POI-only for Massive-STEPS Acc@1 parity.
+    eval_prefixes = bool(eval_cfg.get("use_all_prefixes", False))
+    drop_cold = drop_unseen_user_poi_enabled(cfg)
     train_samples = build_split_samples(frames["train"], vocab, "train", data_cfg)
-    val_samples = build_split_samples(frames["val"], vocab, "val", data_cfg)
-    test_samples = build_split_samples(frames["test"], vocab, "test", data_cfg)
+    val_samples = build_split_samples(
+        frames["val"], vocab, "val", data_cfg, use_all_prefixes=eval_prefixes
+    )
+    test_samples = build_split_samples(
+        frames["test"], vocab, "test", data_cfg, use_all_prefixes=eval_prefixes
+    )
+    n_val_before, n_test_before = len(val_samples), len(test_samples)
+    train_users, train_pois = seen_user_poi_ids_from_train_frame(frames["train"], vocab)
+    val_samples = maybe_drop_unseen_user_poi(
+        val_samples, train_user_ids=train_users, train_poi_ids=train_pois, enabled=drop_cold
+    )
+    test_samples = maybe_drop_unseen_user_poi(
+        test_samples, train_user_ids=train_users, train_poi_ids=train_pois, enabled=drop_cold
+    )
 
     # carve：train 内再切 — model_train 训推荐；estimation 只给 Phase A 估 SURD
+    # Baseline-only (use_surd=false): holdout still carved but Phase A is skipped.
     model_train, estimation = carve_estimator_holdout(
         train_samples, holdout_ratio=float(data_cfg["estimator_holdout_ratio"])
     )
@@ -169,13 +204,18 @@ def main():
             "city": city,
             "split_protocol": "massive_steps_official_trail_stratified",
             "split_paths": {k: str(v) for k, v in split_paths.items()},
-            "backbone": "Flashback (Massive-STEPS/Flashback)",
+            "backbone": str(cfg.get("model", {}).get("backbone", "flashback")),
             "num_pois": vocab.num_pois,
             "num_users": vocab.num_users,
             "n_train": len(model_train),
             "n_estimation": len(estimation),
             "n_val": len(val_samples),
             "n_test": len(test_samples),
+            "n_val_before_cold_filter": n_val_before,
+            "n_test_before_cold_filter": n_test_before,
+            "drop_unseen_user_poi": drop_cold,
+            "eval_use_all_prefixes": eval_prefixes,
+            "use_surd": bool(cfg.get("train", {}).get("use_surd", True)),
             "setting": data_cfg.get("setting", "transductive"),
             "train_counts": train_counts.tolist(),  # 原始 N_y，不是 prior
         },
@@ -187,6 +227,13 @@ def main():
                 f"POIs={vocab.num_pois}  users={vocab.num_users}",
                 f"train={len(model_train)}  est={len(estimation)}  "
                 f"val={len(val_samples)}  test={len(test_samples)}",
+                f"train_prefixes={bool(data_cfg.get('use_all_prefixes', True))}  "
+                f"eval_prefixes={eval_prefixes}  "
+                f"drop_cold={drop_cold}  "
+                f"use_surd={bool(cfg.get('train', {}).get('use_surd', True))}  "
+                f"backbone={cfg.get('model', {}).get('backbone', 'flashback')}  "
+                f"rnn={cfg.get('model', {}).get('rnn_type')}  "
+                f"hidden={cfg.get('model', {}).get('hidden_dim')}",
                 f"device={device}",
             ],
         )
@@ -204,7 +251,9 @@ def main():
         num_workers=int(cfg["train"]["num_workers"]),
     )
 
-    model = build_model(vocab, cfg["model"])
+    # Graph-Flashback builds count graphs from full official-train samples
+    # (before carve) unless transition_pkl / interact_pkl are set.
+    model = build_surd_model(vocab, cfg["model"], train_samples=train_samples)
     trainer = AlternatingSURDTrainer(
         model=model,
         train_loader=loaders["train"],

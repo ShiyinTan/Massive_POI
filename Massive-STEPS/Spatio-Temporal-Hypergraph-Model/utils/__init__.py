@@ -14,7 +14,8 @@ from utils.sys_util import (
 from utils.pipeline_util import (
     save_model,
     count_parameters,
-    test_step
+    test_step,
+    save_eval_results,
 )
 from utils.conf_util import DictToObject, Cfg
 
@@ -32,5 +33,6 @@ __all__ = [
     "seed_torch",
     "save_model",
     "count_parameters",
-    "test_step"
+    "test_step",
+    "save_eval_results",
 ]

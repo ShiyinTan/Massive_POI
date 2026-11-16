@@ -8,7 +8,8 @@ from tqdm import tqdm
 import argparse
 from torch.utils.tensorboard import SummaryWriter
 from preprocess import preprocess
-from utils import seed_torch, set_logger, Cfg, count_parameters, test_step, save_model
+from utils import seed_torch, set_logger, Cfg, count_parameters, test_step, save_model, save_eval_results
+from utils.log_format import format_epoch_train, format_metrics_line
 from layer import NeighborSampler
 from dataset import LBSNDataset
 from model import STHGCN, SequentialTransformer
@@ -45,15 +46,19 @@ if __name__ == '__main__':
     seed_torch(seed)
 
     current_time = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
-    cfg.run_args.save_path = f'tensorboard/{current_time}/{cfg.dataset_args.dataset_name}'
-    cfg.run_args.log_path = f'log/{current_time}/{cfg.dataset_args.dataset_name}'
+    # Clear run folder: outputs/<dataset>_<model>_<timestamp>/{checkpoint,logs,results}
+    run_tag = f'{cfg.dataset_args.dataset_name}_{cfg.model_args.model_name}_{current_time}'
+    cfg.run_args.output_dir = osp.join('outputs', run_tag)
+    cfg.run_args.save_path = osp.join(cfg.run_args.output_dir, 'checkpoint')
+    cfg.run_args.log_path = osp.join(cfg.run_args.output_dir, 'logs')
+    cfg.run_args.results_path = osp.join(cfg.run_args.output_dir, 'results')
+    cfg.run_args.run_tag = run_tag
 
-    if not osp.isdir(cfg.run_args.save_path):
-        os.makedirs(cfg.run_args.save_path)
-    if not osp.isdir(cfg.run_args.log_path):
-        os.makedirs(cfg.run_args.log_path)
+    for path in (cfg.run_args.save_path, cfg.run_args.log_path, cfg.run_args.results_path):
+        os.makedirs(path, exist_ok=True)
 
     set_logger(cfg.run_args)
+    logging.info(f'[Setup] Output directory: {cfg.run_args.output_dir}')
     summary_writer = SummaryWriter(log_dir=cfg.run_args.save_path)
 
     hparam_dict = {}
@@ -162,6 +167,9 @@ if __name__ == '__main__':
         logging.info(f'[Training] Parameter {name}: {param.size()}, require_grad = {param.requires_grad}')
     logging.info(f'[Training] #Parameters: {count_parameters(model)}')
 
+    # Best weights for do_test when disk checkpointing is disabled (default).
+    best_checkpoint = None
+
     if cfg.run_args.do_train:
         current_learning_rate = cfg.run_args.learning_rate
         optimizer = torch.optim.Adam(
@@ -188,11 +196,24 @@ if __name__ == '__main__':
             warm_up_steps = checkpoint['warm_up_steps']
             cooldown_rate = checkpoint['cooldown_rate']
             sizes = checkpoint['sizes']
-            optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+            if 'optimizer_state_dict' in checkpoint:
+                optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+            else:
+                logging.info('[Training] Weights-only checkpoint — optimizer freshly initialized')
         else:
             logging.info(f'[Training] Randomly Initializing Model...')
             init_step = 0
         step = init_step
+
+        # Disk checkpoints are off by default (too large); keep best weights in RAM for test.
+        save_checkpoint = bool(getattr(cfg.run_args, 'save_checkpoint', False))
+        checkpoint_contents = getattr(cfg.run_args, 'checkpoint_contents', 'weights')
+        cfg.run_args.save_checkpoint = save_checkpoint
+        cfg.run_args.checkpoint_contents = checkpoint_contents
+        logging.info(
+            f'[Training] Checkpoint disk save: {save_checkpoint} '
+            f'(contents={checkpoint_contents}; best-only when enabled)'
+        )
 
         # Set valid dataloader as it would be evaluated during training
         logging.info(f'[Training] Initial learning rate: {current_learning_rate}')
@@ -226,21 +247,39 @@ if __name__ == '__main__':
                 summary_writer.add_scalar(f'train/loss_step', loss, global_step)
 
                 if cfg.run_args.do_validate and global_step % cfg.run_args.valid_steps == 0:
-                    logging.info(f'[Evaluating] Evaluating on Valid Dataset...')
-
-                    logging.info(f'[Evaluating] Epoch {eph}, step {global_step}:')
-                    recall_res, ndcg_res, map_res, mrr_res, eval_loss = test_step(model, data=sampler_validate)
-                    summary_writer.add_scalar(f'validate/Recall@1', 100*recall_res[1], global_step)
-                    summary_writer.add_scalar(f'validate/Recall@5', 100*recall_res[5], global_step)
-                    summary_writer.add_scalar(f'validate/Recall@10', 100*recall_res[10], global_step)
-                    summary_writer.add_scalar(f'validate/Recall@20', 100*recall_res[20], global_step)
+                    logging.info(f'[Evaluating] Valid  epoch={eph + 1}/{cfg.run_args.epoch}  step={global_step}')
+                    recall_res, ndcg_res, map_res, mrr_res, eval_loss = test_step(
+                        model, data=sampler_validate, split='valid', epoch=eph + 1, step=global_step
+                    )
+                    summary_writer.add_scalar(f'validate/Acc@1', 100 * recall_res[1], global_step)
+                    summary_writer.add_scalar(f'validate/Acc@5', 100 * recall_res[5], global_step)
+                    summary_writer.add_scalar(f'validate/Acc@10', 100 * recall_res[10], global_step)
+                    summary_writer.add_scalar(f'validate/Acc@20', 100 * recall_res[20], global_step)
+                    # Keep legacy Recall@* TB tags for older dashboards
+                    summary_writer.add_scalar(f'validate/Recall@1', 100 * recall_res[1], global_step)
+                    summary_writer.add_scalar(f'validate/Recall@5', 100 * recall_res[5], global_step)
+                    summary_writer.add_scalar(f'validate/Recall@10', 100 * recall_res[10], global_step)
+                    summary_writer.add_scalar(f'validate/Recall@20', 100 * recall_res[20], global_step)
                     summary_writer.add_scalar(f'validate/MRR', mrr_res, global_step)
                     summary_writer.add_scalar(f'validate/eval_loss', eval_loss, global_step)
                     summary_writer.add_scalar('train/learning_rate', current_learning_rate, global_step)
 
+                    save_eval_results(
+                        cfg.run_args.results_path,
+                        'valid',
+                        recall_res,
+                        ndcg_res,
+                        map_res,
+                        mrr_res,
+                        loss=eval_loss,
+                        epoch=eph + 1,
+                        step=global_step,
+                        run_tag=cfg.run_args.run_tag,
+                    )
+
                     metrics = 4 * recall_res[1] + recall_res[20]
 
-                    # save model based on compositional recall metrics
+                    # keep / optionally persist best-only weights (not every step)
                     if metrics > best_metrics:
                         save_variable_list = {
                             'step': global_step,
@@ -249,7 +288,19 @@ if __name__ == '__main__':
                             'cooldown_rate': cfg.run_args.cooldown_rate,
                             'sizes': sizes
                         }
-                        logging.info(f'[Training] Save model at step {global_step} epoch {eph}')
+                        # CPU copy avoids pinning a large GPU tensor graph in RAM
+                        best_checkpoint = {
+                            **save_variable_list,
+                            'model_state_dict': {
+                                k: v.detach().cpu().clone() for k, v in model.state_dict().items()
+                            },
+                        }
+                        logging.info(
+                            f'[Training] Best valid so far — keep weights'
+                            f'{" + write disk" if save_checkpoint else " (no disk)"}  '
+                            f'epoch={eph + 1} step={global_step}  '
+                            + format_metrics_line(recall_res, mrr_res)
+                        )
                         save_model(model, optimizer, save_variable_list, cfg.run_args, hparam_dict)
                         best_metrics = metrics
 
@@ -268,18 +319,35 @@ if __name__ == '__main__':
                 global_step += 1
 
             epoch_loss = sum([loss for loss in training_logs]) / len(training_logs)
-            logging.info(f'[Training] Average train loss at step {global_step} is {epoch_loss}:')
+            logging.info(format_epoch_train(eph, cfg.run_args.epoch, global_step, epoch_loss))
             summary_writer.add_scalar('train/loss_epoch', epoch_loss, eph)
 
     if cfg.run_args.do_test:
-        logging.info('[Evaluating] Start evaluating on test set...')
+        logging.info('[Evaluating] Test set (best checkpoint)...')
 
-        checkpoint = torch.load(osp.join(cfg.run_args.save_path, 'checkpoint.pt'))
+        ckpt_path = osp.join(cfg.run_args.save_path, 'checkpoint.pt')
+        if best_checkpoint is not None:
+            checkpoint = best_checkpoint
+            logging.info('[Evaluating] Loading best weights from memory')
+        elif osp.isfile(ckpt_path):
+            checkpoint = torch.load(ckpt_path)
+            logging.info(f'[Evaluating] Loading best weights from {ckpt_path}')
+        else:
+            raise FileNotFoundError(
+                f'No best checkpoint in memory or at {ckpt_path}. '
+                'Train with do_validate, or set save_checkpoint: true / provide init_checkpoint.'
+            )
         model.load_state_dict(checkpoint['model_state_dict'])
-        recall_res, ndcg_res, map_res, mrr_res, loss = test_step(model, sampler_test)
+        recall_res, ndcg_res, map_res, mrr_res, loss = test_step(
+            model, sampler_test, split='test', step=checkpoint.get('step')
+        )
         num_params = count_parameters(model)
         metric_dict = {
             'hparam/num_params': num_params,
+            'hparam/Acc@1': recall_res[1],
+            'hparam/Acc@5': recall_res[5],
+            'hparam/Acc@10': recall_res[10],
+            'hparam/Acc@20': recall_res[20],
             'hparam/Recall@1': recall_res[1],
             'hparam/Recall@5': recall_res[5],
             'hparam/Recall@10': recall_res[10],
@@ -294,6 +362,22 @@ if __name__ == '__main__':
             'hparam/MAP@20': map_res[20],
             'hparam/MRR': mrr_res,
         }
-        logging.info(f'[Evaluating] Test evaluation result : {metric_dict}')
+        save_eval_results(
+            cfg.run_args.results_path,
+            'test',
+            recall_res,
+            ndcg_res,
+            map_res,
+            mrr_res,
+            loss=loss,
+            step=checkpoint.get('step'),
+            extra={'num_params': num_params},
+            run_tag=cfg.run_args.run_tag,
+        )
+        logging.info(
+            f'[Evaluating] Test final  '
+            + format_metrics_line(recall_res, mrr_res, ndcg_res=ndcg_res, loss=loss)
+        )
+        logging.info(f'[Results] Full run folder: {cfg.run_args.output_dir}')
         summary_writer.add_hparams(hparam_dict, metric_dict)
         summary_writer.close()

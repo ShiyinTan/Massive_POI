@@ -26,17 +26,27 @@ data:
   setting: transductive
 
 model:
+  # flashback | graph_flashback
+  # (STHGCN: run Massive-STEPS/Spatio-Temporal-Hypergraph-Model directly)
   backbone: flashback
   hidden_dim: 64
-  poi_emb_dim: 64  # ignored when share_poi_embedding=true (Flashback emb dim = hidden_dim)
+  poi_emb_dim: 64  # ignored when share_poi_embedding=true (backbone emb dim = hidden_dim)
   num_layers_history: 1
   dropout: 0.1
   subset_hidden_dim: 64
   rnn_type: gru
-  # Flashback spatiotemporal decay (Massive-STEPS/Flashback defaults)
+  # Flashback / Graph-Flashback spatiotemporal decay
   lambda_t: 0.1
   lambda_s: 100.0
   share_poi_embedding: true
+  # Graph-Flashback: optional KGE pkls; else count-graphs from official train
+  # transition_pkl: null
+  # interact_pkl: null
+  lambda_loc: 1.0
+  lambda_user: 1.0
+  use_weight: false
+  use_graph_user: false
+  use_spatial_graph: false
 
 train:
   batch_size: 64
@@ -45,7 +55,12 @@ train:
   weight_decay: 0.00001
   warmup_epochs: 5
   total_epochs: 40
+  # Optional MultiStepLR (Flashback uses [20,40,60,80] × 0.2); empty = no schedule
+  lr_milestones: []
+  lr_gamma: 0.2
   surd_refresh_interval: 5
+  # SURD aux: set use_surd=false or lambda_*=0 to train Flashback-only
+  use_surd: true
   lambda_u: 0.5
   lambda_s: 0.5
   ema_beta: 0.5
@@ -65,3 +80,10 @@ eval:
   frequency_buckets: [0.2, 0.5]
   # 每个 train epoch 后必跑 val；test 可选（略慢，默认开以便对照）
   eval_test_every_epoch: true
+  # Massive-STEPS Flashback Acc@1 协议：val/test 只评每条 trail 的最后一站
+  # （train 仍可用 data.use_all_prefixes=true）。Acc@1 ≡ recall@1。
+  use_all_prefixes: false
+  # Optional cold filter: drop val/test if user or target POI not in train.
+  # Flashback / Graph-Flashback keep false (Massive-STEPS Acc protocol).
+  drop_unseen_user_poi: false
+  best_metric: recall@1

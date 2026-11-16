@@ -37,7 +37,11 @@ import pandas as pd
 # ---------------------------------------------------------------------------
 REPO_ROOT = Path(__file__).resolve().parents[2]
 FLASHBACK_DIR = REPO_ROOT / "Massive-STEPS" / "Flashback"
+GRAPH_FLASHBACK_DIR = REPO_ROOT / "Massive-STEPS" / "Graph-Flashback"
 MASSIVE_STEPS_DATA = REPO_ROOT / "Massive-STEPS" / "data"
+
+# Bare module names that collide across Flashback / Graph-Flashback.
+_COLLIDING_MODULE_NAMES = ("network", "utils", "dataloader", "dataset", "setting", "trainer")
 
 
 def add_flashback_dir_to_sys_path() -> Path:
@@ -50,6 +54,60 @@ def add_flashback_dir_to_sys_path() -> Path:
     if path not in sys.path:
         sys.path.insert(0, path)
     return FLASHBACK_DIR
+
+
+def add_graph_flashback_dir_to_sys_path() -> Path:
+    """Put ``Massive-STEPS/Graph-Flashback`` on ``sys.path`` (fixed layout)."""
+    path = str(GRAPH_FLASHBACK_DIR)
+    if path not in sys.path:
+        sys.path.insert(0, path)
+    return GRAPH_FLASHBACK_DIR
+
+
+def import_graph_flashback_network():
+    """Import Graph-Flashback ``network`` without permanently clobbering Flashback's.
+
+    Both trees expose bare ``network`` / ``utils``. We temporarily clear those
+    entries, load Graph-Flashback under unique module names, then restore any
+    previously cached Flashback modules.
+    """
+    import importlib
+
+    cache_key = "surd_guided_poi._vendor.graph_flashback.network"
+    if cache_key in sys.modules:
+        return sys.modules[cache_key]
+
+    saved = {name: sys.modules.pop(name) for name in _COLLIDING_MODULE_NAMES if name in sys.modules}
+    gf_path = str(GRAPH_FLASHBACK_DIR)
+    inserted = False
+    if gf_path not in sys.path:
+        sys.path.insert(0, gf_path)
+        inserted = True
+    # Prefer Graph-Flashback over Flashback while importing.
+    if FLASHBACK_DIR.as_posix() in sys.path or str(FLASHBACK_DIR) in sys.path:
+        try:
+            sys.path.remove(str(FLASHBACK_DIR))
+            fb_removed = True
+        except ValueError:
+            fb_removed = False
+    else:
+        fb_removed = False
+    try:
+        gf_utils = importlib.import_module("utils")
+        gf_network = importlib.import_module("network")
+        sys.modules["surd_guided_poi._vendor.graph_flashback.utils"] = gf_utils
+        sys.modules[cache_key] = gf_network
+        # Drop bare names so a later Flashback import can rebind them.
+        for name in _COLLIDING_MODULE_NAMES:
+            sys.modules.pop(name, None)
+        return gf_network
+    finally:
+        if inserted and gf_path in sys.path:
+            sys.path.remove(gf_path)
+        if fb_removed and str(FLASHBACK_DIR) not in sys.path:
+            sys.path.insert(0, str(FLASHBACK_DIR))
+        for name, mod in saved.items():
+            sys.modules[name] = mod
 
 
 # 本模块加载时注册一次，供本文件内的 ``from dataloader import ...`` 使用

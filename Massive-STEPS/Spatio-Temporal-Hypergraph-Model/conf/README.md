@@ -52,6 +52,8 @@
 | |valid_steps|do evaluating every valid_steps|
 | |num_workers|the total number of workers for dataloader|
 | |init_checkpoint|the checkpoint path|
+| |save_checkpoint|whether to write `checkpoint.pt` to disk (default **false**; best weights stay in memory for test). Set true only if you need a file.|
+| |checkpoint_contents|`weights` (default, model only) or `full` (model + optimizer). Only used when `save_checkpoint` is true.|
 |seq_transformer_args|only works when `model_args.name==seq_transformer`| |
 | |sequence_length |the max length of the sequences|
 | |header_num|the head number of multi-head|
