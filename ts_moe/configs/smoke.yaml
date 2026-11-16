@@ -1,0 +1,51 @@
+# Tiny CPU run used to check that estimate → train → evaluate executes.
+seed: 0
+data:
+  city: synthetic
+  synthetic: true
+  n_users: 8
+  n_venues: 6
+  length: 5
+  max_history: 8
+  min_history: 1
+model:
+  d_model: 32
+  n_heads: 4
+  n_layers: 1
+  dropout: 0.1
+  expert_variant: 21
+  top_k: 4
+  temperature: 1.0
+  guidance_scale: 0.1
+  routing_mode: surd
+  max_len: 8
+loss:
+  lambda_route: 0.1
+  lambda_balance: 0.01
+  lambda_shared: 0.0
+surd:
+  estimator: discrete
+  n_folds: 2
+  alpha: 1.0
+  kappa: 10.0
+  n_bins: 4
+  eval_fraction: 0.2
+  neural:
+    d_model: 8
+    epochs: 1
+    batch_size: 16
+    lr: 0.001
+    neg_samples: 4
+    full_softmax_limit: 4096
+train:
+  batch_size: 16
+  lr: 0.001
+  epochs: 1
+  num_negatives: 4
+  grad_clip: 1.0
+eval:
+  ks: [1, 5, 10]
+  candidate_strategy: full
+  recall_m: 10
+  chunk_size: 32
+output_dir: ts_moe/outputs/smoke
