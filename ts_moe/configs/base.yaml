@@ -1,0 +1,54 @@
+# Initial TS-MoE configuration from the spec (section 10.1 / section 15).
+# Hidden size 128, 21 interaction experts, top-4 routing, offline SURD prior,
+# loss = next-POI CE + routing KL + SURD-matched load balance.
+seed: 42
+data:
+  city: beijing
+  data_dir: null
+  synthetic: false
+  max_history: 50
+  min_history: 1
+model:
+  d_model: 128
+  n_heads: 4
+  n_layers: 2
+  dropout: 0.1
+  expert_variant: 21
+  expert_groups: null
+  top_k: 4
+  temperature: 1.0
+  guidance_scale: 0.1
+  routing_mode: surd
+  max_len: 50
+loss:
+  lambda_route: 0.1
+  lambda_balance: 0.01
+  lambda_shared: 0.0
+surd:
+  estimator: neural
+  n_folds: 5
+  alpha: 1.0
+  kappa: 10.0
+  eps: 1.0e-8
+  n_bins: 8
+  eval_fraction: 0.2
+  neural:
+    d_model: 32
+    epochs: 5
+    batch_size: 256
+    lr: 0.001
+    neg_samples: 64
+    full_softmax_limit: 4096
+train:
+  batch_size: 32
+  lr: 0.001
+  weight_decay: 0.0
+  epochs: 20
+  num_negatives: 32
+  grad_clip: 1.0
+eval:
+  ks: [1, 5, 10, 20]
+  candidate_strategy: two_stage
+  recall_m: 100
+  chunk_size: 256
+output_dir: ts_moe/outputs
