@@ -10,6 +10,7 @@ from preprocess.preprocess_fn import reindex_check_ins_id_chronological
 import os
 import os.path as osp
 import logging
+import pickle
 
 
 def ensure_dense_check_ins_id(data: pd.DataFrame) -> pd.DataFrame:
@@ -27,6 +28,79 @@ def ensure_dense_check_ins_id(data: pd.DataFrame) -> pd.DataFrame:
         f"(unique={n_unique}, max={id_max} → max={n_unique - 1})."
     )
     return reindex_check_ins_id_chronological(data)
+
+
+def ensure_dense_traj_id(data: pd.DataFrame, traj_column: str):
+    """Densify trajectory ids to ``0..n-1`` if holes exist; no-op when already dense.
+
+    Returns ``(data, old_to_new, changed)``. Needed so ``filter_chunk``'s ``he_size`` list
+    (indexed by raw traj id) does not IndexError after graph_scope=train filtering.
+    """
+    ids = data[traj_column]
+    n_unique = int(ids.nunique())
+    id_max = int(ids.max()) if n_unique else -1
+    if n_unique == id_max + 1:
+        identity = {int(i): int(i) for i in ids.unique()}
+        return data, identity, False
+
+    sorted_ids = np.sort(ids.unique().astype(np.int64))
+    old_to_new = {int(old): int(new) for new, old in enumerate(sorted_ids)}
+    out = data.copy()
+    out[traj_column] = out[traj_column].map(lambda x: old_to_new[int(x)])
+    logging.info(
+        f"[Preprocess - Generate Hypergraph] densifying {traj_column} "
+        f"(unique={n_unique}, max={id_max} → max={n_unique - 1})."
+    )
+    return out, old_to_new, True
+
+
+def remap_neighbor_traj_ids(neighbor_traj_ids, old_to_new):
+    if neighbor_traj_ids is None:
+        return None
+    return {old_to_new[int(t)] for t in neighbor_traj_ids if int(t) in old_to_new}
+
+
+def remap_cached_sample_traj_ids(output_path: str, old_to_new: dict) -> None:
+    """Rewrite traj id columns in preprocess cache so query node ids match densified edges."""
+    traj_cols = (
+        "pseudo_session_trajectory_id",
+        "query_pseudo_session_trajectory_id",
+        "trajectory_id",
+    )
+    for name in (
+        "sample.csv",
+        "train_sample.csv",
+        "validate_sample.csv",
+        "test_sample.csv",
+        "graph_sample.csv",
+    ):
+        path = osp.join(output_path, name)
+        if not osp.exists(path):
+            continue
+        df = pd.read_csv(path)
+        changed = False
+        for col in traj_cols:
+            if col not in df.columns:
+                continue
+
+            def _map_one(v, mapping=old_to_new):
+                if pd.isna(v):
+                    return v
+                iv = int(v)
+                return mapping.get(iv, iv)
+
+            df[col] = df[col].map(_map_one)
+            changed = True
+        if changed:
+            df.to_csv(path, index=False)
+
+    train_traj_path = osp.join(output_path, "train_traj_ids.pkl")
+    if osp.exists(train_traj_path):
+        with open(train_traj_path, "rb") as f:
+            old_set = pickle.load(f)
+        new_set = {old_to_new[int(t)] for t in old_set if int(t) in old_to_new}
+        with open(train_traj_path, "wb") as f:
+            pickle.dump(new_set, f)
 
 
 def generate_hypergraph_from_file(input_file, output_path, args, neighbor_traj_ids=None):
@@ -66,6 +140,12 @@ def generate_hypergraph_from_file(input_file, output_path, args, neighbor_traj_i
     # Densify before checkin_offset / ci2traj assert. Cached graph_sample.csv from
     # graph_scope=train may still have holes even when sample.csv already exists.
     data = ensure_dense_check_ins_id(data)
+    # Densify traj ids before traj2traj he_size list indexing; remap neighbor set +
+    # cached sample query ids so ci2traj / node lookups stay aligned.
+    data, traj_map, traj_remapped = ensure_dense_traj_id(data, traj_column)
+    neighbor_traj_ids = remap_neighbor_traj_ids(neighbor_traj_ids, traj_map)
+    if traj_remapped:
+        remap_cached_sample_traj_ids(output_path, traj_map)
 
     # If True, Shift traj_id with offset #check_ins_id before saving to pyg data, which means idx of checkin are
     # in range [0, #checkin_id - 1], and idx of trajectory are in range [#checkin, #trajectory+#checkin-1]
