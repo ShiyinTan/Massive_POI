@@ -1,0 +1,78 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1040" height="760" viewBox="0 0 1040 760">
+  <defs>
+    <marker id="ah" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0 1.2 L9 5 L0 8.8 Z" fill="#1a1a1a"/>
+    </marker>
+    <clipPath id="clipL"><circle cx="468" cy="312" r="122"/></clipPath>
+    <style>
+      .math { font-family: "Liberation Serif", "DejaVu Serif", serif; font-style: italic; fill: #1a1a1a; }
+      .zh { font-family: "WenQuanYi Micro Hei", "Droid Sans Fallback", sans-serif; fill: #243040; }
+    </style>
+  </defs>
+  <rect width="1040" height="760" fill="#ffffff"/>
+
+  <text class="zh" x="520" y="36" text-anchor="middle" font-size="18" font-weight="700">候选 POI y 的 SURD 分解</text>
+  <text class="zh" x="520" y="60" text-anchor="middle" font-size="13" fill="#526072">两个源时的样子。Q_U、Q_P、Q_T、Q_L 用同一条入账规则。</text>
+
+  <!-- arrows first so labels sit on top -->
+  <line x1="340" y1="168" x2="188" y2="104" stroke="#1a1a1a" stroke-width="1.2" marker-end="url(#ah)"/>
+  <line x1="370" y1="400" x2="155" y2="455" stroke="#1a1a1a" stroke-width="1.2" marker-end="url(#ah)"/>
+  <line x1="670" y1="400" x2="845" y2="455" stroke="#1a1a1a" stroke-width="1.2" marker-end="url(#ah)"/>
+
+  <!-- synergy = ellipse minus the two source circles -->
+  <ellipse cx="520" cy="292" rx="275" ry="158" fill="#f0c080"/>
+  <circle cx="468" cy="312" r="122" fill="#e09090"/>
+  <circle cx="572" cy="312" r="122" fill="#e09090"/>
+  <circle cx="572" cy="312" r="122" fill="#7f9eaa" clip-path="url(#clipL)"/>
+  <circle cx="468" cy="312" r="122" fill="none" stroke="#1a1a1a" stroke-width="1.5"/>
+  <circle cx="572" cy="312" r="122" fill="none" stroke="#1a1a1a" stroke-width="1.5"/>
+  <ellipse cx="520" cy="292" rx="275" ry="158" fill="none" stroke="#1a1a1a" stroke-width="1.7"/>
+
+  <!-- region names -->
+  <text class="math" x="520" y="172" text-anchor="middle" font-size="22">
+    ΔI<tspan font-size="14" baseline-shift="super">S</tspan><tspan font-size="14" baseline-shift="sub">UP</tspan>(y)
+  </text>
+  <text class="math" x="400" y="322" text-anchor="middle" font-size="18">
+    ΔI<tspan font-size="12" baseline-shift="super">U</tspan><tspan font-size="12" baseline-shift="sub">U</tspan>(y)
+  </text>
+  <text class="math" x="520" y="322" text-anchor="middle" font-size="18">
+    ΔI<tspan font-size="12" baseline-shift="super">R</tspan><tspan font-size="12" baseline-shift="sub">UP</tspan>(y)
+  </text>
+  <text class="math" x="648" y="322" text-anchor="middle" font-size="18">
+    ΔI<tspan font-size="12" baseline-shift="super">U</tspan><tspan font-size="12" baseline-shift="sub">P</tspan>(y)
+  </text>
+
+  <!-- outside information labels -->
+  <text class="math" x="40" y="100" font-size="22">
+    i(y; Q<tspan font-size="14" baseline-shift="sub">U</tspan>, Q<tspan font-size="14" baseline-shift="sub">P</tspan>)
+  </text>
+  <text class="math" x="28" y="468" font-size="22">
+    i(y; Q<tspan font-size="14" baseline-shift="sub">U</tspan>)
+  </text>
+  <text class="math" x="860" y="468" font-size="22">
+    i(y; Q<tspan font-size="14" baseline-shift="sub">P</tspan>)
+  </text>
+
+  <!-- four sources -->
+  <text class="zh" x="520" y="500" text-anchor="middle" font-size="13" fill="#526072">四个源，每个候选 y 单独分解</text>
+  <g font-family="Liberation Serif" font-style="italic" font-size="16" fill="#1a1a1a">
+    <rect x="250" y="514" width="110" height="36" rx="18" fill="#f7f1ea" stroke="#d9c4ae"/>
+    <text x="305" y="538" text-anchor="middle">Q<tspan font-size="11" baseline-shift="sub">U</tspan></text>
+    <rect x="390" y="514" width="110" height="36" rx="18" fill="#f7f1ea" stroke="#d9c4ae"/>
+    <text x="445" y="538" text-anchor="middle">Q<tspan font-size="11" baseline-shift="sub">P</tspan></text>
+    <rect x="530" y="514" width="110" height="36" rx="18" fill="#f7f1ea" stroke="#d9c4ae"/>
+    <text x="585" y="538" text-anchor="middle">Q<tspan font-size="11" baseline-shift="sub">T</tspan></text>
+    <rect x="670" y="514" width="110" height="36" rx="18" fill="#f7f1ea" stroke="#d9c4ae"/>
+    <text x="725" y="538" text-anchor="middle">Q<tspan font-size="11" baseline-shift="sub">L</tspan></text>
+  </g>
+  <text class="zh" x="305" y="566" text-anchor="middle" font-size="11" fill="#6a7684">User</text>
+  <text class="zh" x="445" y="566" text-anchor="middle" font-size="11" fill="#6a7684">POI</text>
+  <text class="zh" x="585" y="566" text-anchor="middle" font-size="11" fill="#6a7684">Time</text>
+  <text class="zh" x="725" y="566" text-anchor="middle" font-size="11" fill="#6a7684">Location</text>
+
+  <text class="zh" x="80" y="610" font-size="14">特异信息 i(y; Q_A) 按数值从小到大把增量入账，不是对 15 个子集互信息做容斥。</text>
+  <text class="zh" x="80" y="636" font-size="14">单源增量：冗余池里还有别的源，记入当前池的 redundancy；池里只剩一个源，记入 unique。</text>
+  <text class="zh" x="80" y="662" font-size="14">两个及以上的源，整笔增量记入该子集的 synergy。池大于两个源时，冗余再均分到其中的 pair。</text>
+  <text class="zh" x="80" y="688" font-size="14">每个 y 自己留一套原子，增量不乘 P(Y=y)。原子之和等于剪裁后的最大子集特异信息。</text>
+  <text class="zh" x="80" y="722" font-size="12" fill="#8b97a6">assign_surd_from_specific_mi  decomposition.py:112    atoms_to_expert_mass  atoms.py:121    i(y; Q_A)  estimators.py:5</text>
+</svg>
