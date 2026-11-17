@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
-"""Check graph_scope=train check_ins_id densify (no HF / PyG needed)."""
+"""Check check_ins_id densify for graph_scope=train (no HF / PyG needed)."""
 from __future__ import annotations
 
-import importlib.util
 import os.path as osp
 import sys
 
@@ -10,47 +9,68 @@ import numpy as np
 import pandas as pd
 
 _ROOT = osp.dirname(osp.dirname(osp.abspath(__file__)))
-_spec = importlib.util.spec_from_file_location(
-    "preprocess_fn", osp.join(_ROOT, "preprocess", "preprocess_fn.py")
-)
-_mod = importlib.util.module_from_spec(_spec)
-assert _spec.loader is not None
-# Avoid pulling sklearn via id_encode import side effects if missing: load source of helper only.
-src = open(osp.join(_ROOT, "preprocess", "preprocess_fn.py"), encoding="utf-8").read()
-# Exec just the helper by importing the module normally when possible.
-try:
-    sys.path.insert(0, _ROOT)
-    from preprocess.preprocess_fn import reindex_check_ins_id_chronological
-except Exception:
-    ns: dict = {"np": np, "pd": pd}
-    exec(
-        "def reindex_check_ins_id_chronological(df):\n"
-        "    out = df.copy()\n"
-        "    order = np.argsort(out['check_ins_id'].to_numpy(), kind='mergesort')\n"
-        "    new_ids = np.empty(len(out), dtype=np.int64)\n"
-        "    new_ids[order] = np.arange(len(out), dtype=np.int64)\n"
-        "    out['check_ins_id'] = new_ids\n"
-        "    return out\n",
-        ns,
+
+
+def reindex_check_ins_id_chronological(df: pd.DataFrame) -> pd.DataFrame:
+    """Inline copy of preprocess_fn helper (avoid importing preprocess → torch_sparse)."""
+    out = df.copy()
+    order = np.argsort(out["check_ins_id"].to_numpy(), kind="mergesort")
+    new_ids = np.empty(len(out), dtype=np.int64)
+    new_ids[order] = np.arange(len(out), dtype=np.int64)
+    out["check_ins_id"] = new_ids
+    return out
+
+
+def ensure_dense_check_ins_id(data: pd.DataFrame) -> pd.DataFrame:
+    """Mirror generate_hypergraph.ensure_dense_check_ins_id without torch/PyG imports."""
+    n_unique = int(data["check_ins_id"].nunique())
+    id_max = int(data["check_ins_id"].max()) if n_unique else -1
+    if n_unique == id_max + 1:
+        return data
+    return reindex_check_ins_id_chronological(data)
+
+
+def assert_dense_chronological(data: pd.DataFrame) -> None:
+    """Same check as generate_ci2traj_pyg_data line ~150."""
+    assert data.check_ins_id.unique().shape[0] == data.check_ins_id.max() + 1, (
+        "check_ins_id is not chronological order in raw data"
     )
-    reindex_check_ins_id_chronological = ns["reindex_check_ins_id_chronological"]
 
 
 def main() -> int:
-    # Simulate holes after dropping trails from a global chronological id space.
+    # Holes like cached graph_sample.csv after trail filter (e.g. 0,1,5).
     df = pd.DataFrame(
         {
-            "check_ins_id": [0, 3, 4, 8, 10],
-            "UTCTimeOffsetEpoch": [100, 130, 140, 180, 200],
+            "check_ins_id": [0, 1, 5],
+            "UTCTimeOffsetEpoch": [100, 110, 150],
         }
     )
     assert df.check_ins_id.nunique() != df.check_ins_id.max() + 1
-    out = reindex_check_ins_id_chronological(df)
-    assert out.check_ins_id.nunique() == out.check_ins_id.max() + 1
-    assert list(out.check_ins_id) == [0, 1, 2, 3, 4]
-    # Dense already → identity
+    try:
+        assert_dense_chronological(df)
+        raise AssertionError("expected assert to fail on holes")
+    except AssertionError as exc:
+        if "chronological" not in str(exc):
+            raise
+
+    out = ensure_dense_check_ins_id(df)
+    assert_dense_chronological(out)
+    assert list(out.check_ins_id) == [0, 1, 2]
+
+    # Already dense (graph_scope=full) → no-op identity.
     dense = pd.DataFrame({"check_ins_id": [0, 1, 2], "UTCTimeOffsetEpoch": [1, 2, 3]})
-    assert list(reindex_check_ins_id_chronological(dense).check_ins_id) == [0, 1, 2]
+    same = ensure_dense_check_ins_id(dense)
+    assert list(same.check_ins_id) == [0, 1, 2]
+    assert_dense_chronological(same)
+
+    # Larger hole set via reindex helper
+    wide = pd.DataFrame(
+        {"check_ins_id": [0, 3, 4, 8, 10], "UTCTimeOffsetEpoch": [100, 130, 140, 180, 200]}
+    )
+    wide_out = reindex_check_ins_id_chronological(wide)
+    assert_dense_chronological(wide_out)
+    assert list(wide_out.check_ins_id) == [0, 1, 2, 3, 4]
+
     print("SCOPE_TRAIN_REINDEX_OK")
     return 0
 
