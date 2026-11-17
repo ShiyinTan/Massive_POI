@@ -317,7 +317,14 @@ def merge_traj2traj_data(traj_stat, intra_u_data, inter_u_data, checkin_offset):
     :param checkin_offset: max checkin index plus 1;
     :return: pyg data of traj2traj
     """
-    traj_feature = traj_stat[['size', 'mean_lon', 'mean_lat', 'mean_time', 'start_time', 'end_time']].to_numpy()
+    # Index by trajectory id so gaps after graph_scope=train filtering still align
+    # with edge_index (raw traj ids). Dense 0..n-1 (graph_scope=full) is unchanged.
+    feat_cols = ['size', 'mean_lon', 'mean_lat', 'mean_time', 'start_time', 'end_time']
+    raw_feat = traj_stat[feat_cols].to_numpy()
+    n_traj_slots = int(traj_stat.index.max()) + 1 if len(traj_stat) else 0
+    traj_feature = np.zeros((n_traj_slots, len(feat_cols)), dtype=raw_feat.dtype)
+    if len(traj_stat):
+        traj_feature[traj_stat.index.to_numpy()] = raw_feat
 
     # add two extra feature column to make sure traj feature has the same dimension size with ci feature
     padding_feature = np.zeros([traj_feature.shape[0], 2])

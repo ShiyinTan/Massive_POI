@@ -31,7 +31,10 @@ class LBSNDataset:
         self.edge_delta_s = [traj2traj.edge_delta_s, ci2traj.edge_delta_s]
         self.edge_type = [traj2traj.edge_type, None]
 
-        self.checkin_offset = torch.as_tensor([df.check_ins_id.max() + 1], dtype=torch.long)
+        # Must match hypergraph traj offset (= #checkin rows in ci2traj.x). Under
+        # graph_scope=train, graph_sample.csv reindexes check_ins_id, so sample.csv
+        # max+1 would disagree with edge_index.
+        self.checkin_offset = torch.as_tensor([ci2traj.x.shape[0]], dtype=torch.long)
         self.node_idx_train = self.get_node_id(df_train)
         self.node_idx_valid = self.get_node_id(df_valid)
         self.node_idx_test = self.get_node_id(df_test)

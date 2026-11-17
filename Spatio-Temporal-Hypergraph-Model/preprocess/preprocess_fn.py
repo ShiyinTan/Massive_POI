@@ -1,9 +1,26 @@
+import numpy as np
 import pandas as pd
 from typing import Dict, Tuple
 from functools import partial
 from tqdm.contrib.concurrent import process_map
 from sklearn.preprocessing import LabelEncoder
 import logging
+
+
+def reindex_check_ins_id_chronological(df: pd.DataFrame) -> pd.DataFrame:
+    """Reassign ``check_ins_id`` to dense ``0..n-1`` in chronological order.
+
+    Used after ``graph_scope=train`` filtering, which drops trails and leaves holes
+    in the original global ``check_ins_id`` sequence. Relative order follows the
+    existing ids (already time-ranked); only density is restored.
+    """
+    out = df.copy()
+    # Preserve chronological order encoded in the pre-filter ids.
+    order = np.argsort(out["check_ins_id"].to_numpy(), kind="mergesort")
+    new_ids = np.empty(len(out), dtype=np.int64)
+    new_ids[order] = np.arange(len(out), dtype=np.int64)
+    out["check_ins_id"] = new_ids
+    return out
 
 
 def encode(x, label_encoder, padding_id):
