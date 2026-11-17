@@ -166,4 +166,5 @@ notebooks/
 data/*/*.csv
 data/*/graph*
 data/*/preprocessed/
+data/*/preprocessed_*/
 results/**/user_*.json

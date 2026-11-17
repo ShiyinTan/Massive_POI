@@ -120,5 +120,8 @@ venv.bak/
 # mypy
 .mypy_cache/
 
-data
+# `data` is a tracked relative symlink → ../Massive-STEPS/data (HF CSVs live there, gitignored).
+# Ignore a real local data/ tree only if someone replaces the symlink with a directory.
+data/**
+!data
 notebooks/

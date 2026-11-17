@@ -55,7 +55,9 @@ time,city,run_name,use_user_embed,hypergraph_edges,graph_scope,unseen_prefix_poi
 
 ## 命令（CPU · 四城 · 勿省略 `--gpu -1`）
 
-在 `Spatio-Temporal-Hypergraph-Model/` 下执行（需先按 README 链好 HF `data/$city/*_checkins_*.csv`）。
+`Spatio-Temporal-Hypergraph-Model/data` → `../Massive-STEPS/data`（相对 symlink）；把 HF 的 `{city}_checkins_{train,validation,test}.csv` 放到 `Massive-STEPS/data/<city>/`（该目录下 `*.csv` 已 gitignore，勿提交）。
+
+在 `Spatio-Temporal-Hypergraph-Model/` 下执行：
 
 ```bash
 cd Spatio-Temporal-Hypergraph-Model
