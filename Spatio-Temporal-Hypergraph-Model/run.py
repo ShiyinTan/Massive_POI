@@ -22,6 +22,12 @@ SUMMARY_CSV_HEADER = [
 ]
 
 
+def _fsync_file(f):
+    """Flush Python buffers and fsync so a kill keeps the last summary row."""
+    f.flush()
+    os.fsync(f.fileno())
+
+
 def append_summary_csv(root_dir, row: dict):
     """Append one finished-test row to results/summary.csv (create/upgrade header if needed)."""
     path = osp.join(root_dir, 'results', 'summary.csv')
@@ -37,6 +43,7 @@ def append_summary_csv(root_dir, row: dict):
                 with open(path, 'a', newline='') as af:
                     writer = csv.DictWriter(af, fieldnames=SUMMARY_CSV_HEADER)
                     writer.writerow({k: row.get(k, '') for k in SUMMARY_CSV_HEADER})
+                    _fsync_file(af)
                 return
     with open(path, 'w', newline='') as f:
         writer = csv.DictWriter(f, fieldnames=SUMMARY_CSV_HEADER)
@@ -44,6 +51,7 @@ def append_summary_csv(root_dir, row: dict):
         for old in existing_rows:
             writer.writerow({k: old.get(k, '') for k in SUMMARY_CSV_HEADER})
         writer.writerow({k: row.get(k, '') for k in SUMMARY_CSV_HEADER})
+        _fsync_file(f)
 
 
 if __name__ == '__main__':

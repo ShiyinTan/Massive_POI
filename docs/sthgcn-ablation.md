@@ -55,17 +55,17 @@ time,city,run_name,use_user_embed,hypergraph_edges,graph_scope,unseen_prefix_poi
 
 ## 批量消融 runner（mean±std）
 
-一键跑完整 suite（`paper` + 六个单因素：`no_user` / `edges_*` / `scope_train` / `prefix_drop`），每配置 `--runs` 次不同 seed，结束后写：
+一键跑完整 suite（`paper` + 六个单因素：`no_user` / `edges_*` / `scope_train` / `prefix_drop`），每配置 `--runs` 次不同 seed；**每跑完一个 city+run_name+seed 就写入/fsync `summary.csv` 并刷新 mean±std**，崩溃后用**同一条命令**接着跑（已完成的 skip；省略 `--seeds` 时种子落在 `results/ablation_seeds.json` 以便 resume 一致）：
 
-- `results/ablation_summary.csv` — 每行 `city+run_name`：`n` 与 Recall@1/5/10/20、MRR 的 mean / sample std（`ddof=1`；`n=1` 时 std 留空）
+- `results/ablation_summary.csv` — 每行 `city+run_name`：`n` 与 Recall@1/5/10/20、MRR 的 mean / sample std（`ddof=1`；`n=1` 时 std 留空；`n`=已完成 seed 数）
 - `results/ablation_summary.md` — 按城一张表（`paper` 行在前），单元格为 `mean±std`（由 csv 生成）
 
 ```bash
 cd Spatio-Temporal-Hypergraph-Model
 # beijing · 5 seeds · GPU 用 yaml（不传 --gpu；不改 CUDA_VISIBLE_DEVICES）
 python3 scripts/run_ablations.py --city beijing --runs 5
-# 论文单 seed：python3 scripts/run_ablations.py --city beijing --runs 1 --seeds 54607333
-# 已有 city+run_name+seed 的 summary 行会 skip（--force 重跑）
+# 中断后直接再跑同一条命令即可 resume；论文单 seed：--runs 1 --seeds 54607333
+# --force 忽略已有 summary 行全部重跑
 ```
 
 ## 单次命令（CPU · 四城 · 勿省略 `--gpu -1`）
