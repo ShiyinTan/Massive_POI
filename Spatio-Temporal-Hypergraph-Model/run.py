@@ -16,21 +16,33 @@ from model import STHGCN, SequentialTransformer
 
 
 SUMMARY_CSV_HEADER = [
-    'time', 'city', 'run_name', 'use_user_embed', 'hypergraph_edges',
+    'time', 'city', 'run_name', 'seed', 'use_user_embed', 'hypergraph_edges',
     'graph_scope', 'unseen_prefix_poi', 'gpu',
     'Recall@1', 'Recall@5', 'Recall@10', 'Recall@20', 'MRR', 'log_dir',
 ]
 
 
 def append_summary_csv(root_dir, row: dict):
-    """Append one finished-test row to results/summary.csv (create header if missing)."""
+    """Append one finished-test row to results/summary.csv (create/upgrade header if needed)."""
     path = osp.join(root_dir, 'results', 'summary.csv')
     os.makedirs(osp.dirname(path), exist_ok=True)
-    write_header = not osp.exists(path) or osp.getsize(path) == 0
-    with open(path, 'a', newline='') as f:
+    existing_rows = []
+    if osp.exists(path) and osp.getsize(path) > 0:
+        with open(path, 'r', newline='') as f:
+            reader = csv.DictReader(f)
+            if reader.fieldnames and list(reader.fieldnames) != SUMMARY_CSV_HEADER:
+                existing_rows = list(reader)
+            elif reader.fieldnames:
+                # Header already current; append only.
+                with open(path, 'a', newline='') as af:
+                    writer = csv.DictWriter(af, fieldnames=SUMMARY_CSV_HEADER)
+                    writer.writerow({k: row.get(k, '') for k in SUMMARY_CSV_HEADER})
+                return
+    with open(path, 'w', newline='') as f:
         writer = csv.DictWriter(f, fieldnames=SUMMARY_CSV_HEADER)
-        if write_header:
-            writer.writeheader()
+        writer.writeheader()
+        for old in existing_rows:
+            writer.writerow({k: old.get(k, '') for k in SUMMARY_CSV_HEADER})
         writer.writerow({k: row.get(k, '') for k in SUMMARY_CSV_HEADER})
 
 
@@ -53,13 +65,14 @@ if __name__ == '__main__':
         device = 'cpu'
     cfg.run_args.device = device
 
-    # for multiple runs, seed is replaced with random value
-    if args.multi_run_mode:
-        cfg.run_args.seed = None
-    if cfg.run_args.seed is None:
+    # --seed overrides yaml; --multi_run_mode draws a random seed when neither is set
+    if getattr(args, 'seed', None) is not None:
+        seed = int(args.seed)
+    elif args.multi_run_mode or cfg.run_args.seed is None:
         seed = random.randint(0, 100000000)
     else:
         seed = int(cfg.run_args.seed)
+    cfg.run_args.seed = seed
 
     seed_torch(seed)
 
@@ -344,6 +357,7 @@ if __name__ == '__main__':
                 'time': current_time,
                 'city': city,
                 'run_name': run_name,
+                'seed': seed,
                 'use_user_embed': args.use_user_embed,
                 'hypergraph_edges': args.hypergraph_edges,
                 'graph_scope': args.graph_scope,

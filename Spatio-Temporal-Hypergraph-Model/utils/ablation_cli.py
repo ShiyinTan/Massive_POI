@@ -44,6 +44,12 @@ def build_arg_parser() -> argparse.ArgumentParser:
         default=None,
         help="Override conf run_args.gpu (-1=CPU, >=0 CUDA index). Default: value from yaml.",
     )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=None,
+        help="Override conf run_args.seed. Default: value from yaml (or random with --multi_run_mode).",
+    )
     return parser
 
 
@@ -57,6 +63,8 @@ def apply_ablation_args(cfg, args):
     cfg.dataset_args.unseen_prefix_poi = args.unseen_prefix_poi
     if args.gpu is not None:
         cfg.run_args.gpu = args.gpu
+    if getattr(args, "seed", None) is not None:
+        cfg.run_args.seed = int(args.seed)
     return cfg
 
 
