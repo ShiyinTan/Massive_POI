@@ -6,9 +6,27 @@ import torch
 from torch_sparse import SparseTensor
 from torch_geometric.data import Data
 from utils import haversine
+from preprocess.preprocess_fn import reindex_check_ins_id_chronological
 import os
 import os.path as osp
 import logging
+
+
+def ensure_dense_check_ins_id(data: pd.DataFrame) -> pd.DataFrame:
+    """Densify ``check_ins_id`` to ``0..n-1`` if holes exist; no-op when already dense.
+
+    Must run on the in-memory frame that feeds ``generate_ci2traj_pyg_data`` (not only on
+    a CSV write path that may be skipped when caches already exist).
+    """
+    n_unique = int(data["check_ins_id"].nunique())
+    id_max = int(data["check_ins_id"].max()) if n_unique else -1
+    if n_unique == id_max + 1:
+        return data
+    logging.info(
+        f"[Preprocess - Generate Hypergraph] densifying check_ins_id "
+        f"(unique={n_unique}, max={id_max} → max={n_unique - 1})."
+    )
+    return reindex_check_ins_id_chronological(data)
 
 
 def generate_hypergraph_from_file(input_file, output_path, args, neighbor_traj_ids=None):
@@ -44,6 +62,10 @@ def generate_hypergraph_from_file(input_file, output_path, args, neighbor_traj_i
     data = pd.read_csv(input_file, usecols=usecols)
 
     traj_column = 'pseudo_session_trajectory_id'
+
+    # Densify before checkin_offset / ci2traj assert. Cached graph_sample.csv from
+    # graph_scope=train may still have holes even when sample.csv already exists.
+    data = ensure_dense_check_ins_id(data)
 
     # If True, Shift traj_id with offset #check_ins_id before saving to pyg data, which means idx of checkin are
     # in range [0, #checkin_id - 1], and idx of trajectory are in range [#checkin, #trajectory+#checkin-1]
