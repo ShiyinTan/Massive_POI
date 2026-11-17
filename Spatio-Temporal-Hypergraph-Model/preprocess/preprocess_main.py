@@ -12,6 +12,7 @@ from preprocess import (
     FileReader,
     generate_hypergraph_from_file,
 )
+from preprocess.preprocess_fn import reindex_check_ins_id_chronological
 import logging
 
 
@@ -287,6 +288,16 @@ def preprocess(cfg: Cfg):
             )
             keep_trajs = train_trajs | eval_trajs
             graph_df = sample_df[sample_df["pseudo_session_trajectory_id"].isin(keep_trajs)].copy()
+            # Filtering leaves holes in global check_ins_id; densify for hypergraph
+            # (generate_ci2traj_pyg_data asserts 0..n-1). sample.csv keeps original ids.
+            before_nunique = int(graph_df["check_ins_id"].nunique())
+            before_max = int(graph_df["check_ins_id"].max()) if before_nunique else -1
+            graph_df = reindex_check_ins_id_chronological(graph_df)
+            logging.info(
+                f"[Preprocess] graph_scope=train: reindexed check_ins_id "
+                f"(unique={before_nunique}, max_before={before_max} → "
+                f"max_after={int(graph_df['check_ins_id'].max())})."
+            )
             graph_df.to_csv(graph_csv, index=False)
             with open(osp.join(preprocessed_path, "train_traj_ids.pkl"), "wb") as f:
                 pickle.dump(train_trajs, f)
