@@ -1,13 +1,20 @@
 #!/usr/bin/env python3
 """Run the STHGCN ablation suite over multiple seeds; write mean±std summaries.
 
+Resume-safe: skips city+run_name+seed rows already in results/summary.csv, rebuilds
+ablation_summary.{csv,md} after each success, and persists drawn seeds to
+results/ablation_seeds.json when --seeds is omitted.
+
 Does not set CUDA_VISIBLE_DEVICES (honors the environment). Omitting --gpu leaves
 run.py on the yaml default. Paper single-seed: --runs 1 --seeds 54607333.
+
+Re-run the same command after a crash to continue; no extra flags needed.
 """
 from __future__ import annotations
 
 import argparse
 import csv
+import json
 import math
 import os
 import os.path as osp
@@ -50,7 +57,10 @@ SUITE_ORDER = [name for name, _ in ABLATION_SUITE]
 
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
-        description="Run STHGCN ablations repeatedly and report mean±std."
+        description=(
+            "Run STHGCN ablations repeatedly and report mean±std. "
+            "Re-run the same command after a crash to resume."
+        )
     )
     p.add_argument(
         "--city",
@@ -72,7 +82,8 @@ def build_parser() -> argparse.ArgumentParser:
         nargs="+",
         default=None,
         help="Seeds for the repeats. Must match --runs if set. "
-        f"If omitted, draw --runs distinct seeds. Paper: --runs 1 --seeds {PAPER_SEED}.",
+        f"If omitted, draw --runs distinct seeds (saved to results/ablation_seeds.json "
+        f"and reused on resume). Paper: --runs 1 --seeds {PAPER_SEED}.",
     )
     p.add_argument(
         "--force",
@@ -107,19 +118,95 @@ def draw_seeds(n: int, rng: Optional[random.Random] = None) -> List[int]:
     return seeds
 
 
-def resolve_seeds(runs: int, seeds: Optional[Sequence[int]]) -> List[int]:
-    if seeds is None:
-        out = draw_seeds(runs)
-        print(f"[ablation-runner] drew seeds={out}")
-        return out
-    if len(seeds) != runs:
-        raise SystemExit(
-            f"--seeds has {len(seeds)} value(s) but --runs={runs}; they must match."
-        )
-    out = list(seeds)
+def _fsync_write(path: str, text: str) -> None:
+    os.makedirs(osp.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(text)
+        f.flush()
+        os.fsync(f.fileno())
+
+
+def seeds_json_path(root: str) -> str:
+    return osp.join(root, "results", "ablation_seeds.json")
+
+
+def load_persisted_seeds(
+    root: str,
+    cities: Sequence[str],
+    runs: int,
+) -> Optional[List[int]]:
+    path = seeds_json_path(root)
+    if not osp.exists(path):
+        return None
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, json.JSONDecodeError) as exc:
+        print(f"[ablation-runner] warning: could not read {path}: {exc}")
+        return None
+    if list(data.get("cities", [])) != list(cities):
+        return None
+    if int(data.get("runs", -1)) != int(runs):
+        return None
+    if list(data.get("suite", [])) != list(SUITE_ORDER):
+        return None
+    seeds = data.get("seeds")
+    if not isinstance(seeds, list) or len(seeds) != runs:
+        return None
+    try:
+        out = [int(s) for s in seeds]
+    except (TypeError, ValueError):
+        return None
     if len(set(out)) != len(out):
-        raise SystemExit("--seeds must be distinct.")
-    print(f"[ablation-runner] using seeds={out}")
+        return None
+    return out
+
+
+def persist_seeds(
+    root: str,
+    cities: Sequence[str],
+    runs: int,
+    seeds: Sequence[int],
+) -> str:
+    path = seeds_json_path(root)
+    payload = {
+        "cities": list(cities),
+        "runs": int(runs),
+        "suite": list(SUITE_ORDER),
+        "seeds": [int(s) for s in seeds],
+    }
+    _fsync_write(path, json.dumps(payload, indent=2) + "\n")
+    return path
+
+
+def resolve_seeds(
+    root: str,
+    cities: Sequence[str],
+    runs: int,
+    seeds: Optional[Sequence[int]],
+) -> List[int]:
+    """Return the seed list; persist when drawn so resume keeps the same plan."""
+    if seeds is not None:
+        if len(seeds) != runs:
+            raise SystemExit(
+                f"--seeds has {len(seeds)} value(s) but --runs={runs}; they must match."
+            )
+        out = list(seeds)
+        if len(set(out)) != len(out):
+            raise SystemExit("--seeds must be distinct.")
+        print(f"[ablation-runner] using CLI seeds={out}")
+        return out
+
+    persisted = load_persisted_seeds(root, cities, runs)
+    if persisted is not None:
+        print(
+            f"[ablation-runner] resumed seeds from {seeds_json_path(root)}: {persisted}"
+        )
+        return persisted
+
+    out = draw_seeds(runs)
+    path = persist_seeds(root, cities, runs, out)
+    print(f"[ablation-runner] drew seeds={out} (saved {path} for resume)")
     return out
 
 
@@ -167,6 +254,25 @@ def build_run_cmd(
     return cmd
 
 
+def format_resume_command(
+    cities: Sequence[str],
+    runs: int,
+    gpu: Optional[int],
+    seeds: Optional[Sequence[int]],
+    used_cli_seeds: bool,
+) -> str:
+    parts = [sys.executable, "scripts/run_ablations.py"]
+    for c in cities:
+        parts.extend(["--city", c])
+    parts.extend(["--runs", str(runs)])
+    if gpu is not None:
+        parts.extend(["--gpu", str(gpu)])
+    if used_cli_seeds and seeds is not None:
+        parts.append("--seeds")
+        parts.extend(str(s) for s in seeds)
+    return " ".join(parts)
+
+
 def run_suite(
     cities: Sequence[str],
     seeds: Sequence[int],
@@ -174,10 +280,14 @@ def run_suite(
     force: bool,
     dry_run: bool,
     root: str,
+    resume_cmd: str,
 ) -> None:
     os.chdir(root)
     summary_path = summary_csv_path(root)
     done = completed_keys(load_summary_rows(summary_path))
+    planned = len(cities) * len(ABLATION_SUITE) * len(seeds)
+    skipped = 0
+    ran = 0
 
     for city in cities:
         for run_name, flags in ABLATION_SUITE:
@@ -187,20 +297,44 @@ def run_suite(
                 key = (city, run_name, str(seed))
                 if not force and key in done:
                     print(f"[skip] {city}/{run_name}/seed={seed} (already in summary.csv)")
+                    skipped += 1
                     continue
                 cmd = build_run_cmd(city, flags, seed, gpu)
                 print(f"[run] {' '.join(cmd)}")
                 if dry_run:
+                    ran += 1
                     continue
                 # Honor existing CUDA_VISIBLE_DEVICES; do not set/override it.
                 env = os.environ.copy()
                 proc = subprocess.run(cmd, cwd=root, env=env)
                 if proc.returncode != 0:
-                    raise SystemExit(
-                        f"run.py failed (exit {proc.returncode}) for "
-                        f"city={city} run_name={run_name} seed={seed}"
+                    # Failed runs must not count as success; run.py only appends after test.
+                    print(
+                        f"[ablation-runner] run.py failed (exit {proc.returncode}) for "
+                        f"city={city} run_name={run_name} seed={seed}. "
+                        f"No success row written. Re-run the same command to resume:\n"
+                        f"  {resume_cmd}"
                     )
-                done.add(key)
+                    raise SystemExit(proc.returncode)
+
+                # run.py appends+fsyncs summary.csv on success; refresh skip set from disk.
+                done = completed_keys(load_summary_rows(summary_path))
+                if key not in done:
+                    print(
+                        f"[ablation-runner] warning: expected summary row missing for "
+                        f"{city}/{run_name}/seed={seed} after exit 0; "
+                        f"will retry on next resume."
+                    )
+                else:
+                    done.add(key)
+                    ran += 1
+                    # Partial suite: rebuild mean±std over finished seeds only.
+                    write_summaries(root, cities, quiet=False)
+
+    print(
+        f"[ablation-runner] planned={planned} skipped={skipped} "
+        f"ran_or_dry={ran} force={force}"
+    )
 
 
 def _to_float(val) -> Optional[float]:
@@ -274,6 +408,8 @@ def write_ablation_summary_csv(path: str, rows: Sequence[dict]) -> None:
         writer.writeheader()
         for r in rows:
             writer.writerow({k: r.get(k, "") for k in ABLATION_SUMMARY_HEADER})
+        f.flush()
+        os.fsync(f.fileno())
 
 
 def _fmt_mean_std(mean, std) -> str:
@@ -307,26 +443,30 @@ def render_ablation_summary_md(rows: Sequence[dict], cities: Sequence[str]) -> s
     return "\n".join(lines).rstrip() + "\n"
 
 
-def write_summaries(root: str, cities: Sequence[str]) -> str:
+def write_summaries(root: str, cities: Sequence[str], quiet: bool = False) -> str:
     rows = load_summary_rows(summary_csv_path(root))
     agg = aggregate_rows(rows, cities)
     csv_path = osp.join(root, "results", "ablation_summary.csv")
     md_path = osp.join(root, "results", "ablation_summary.md")
     write_ablation_summary_csv(csv_path, agg)
     md = render_ablation_summary_md(agg, cities)
-    os.makedirs(osp.dirname(md_path), exist_ok=True)
-    with open(md_path, "w", encoding="utf-8") as f:
-        f.write(md)
-    print(f"[ablation-runner] wrote {csv_path}")
-    print(f"[ablation-runner] wrote {md_path}")
+    _fsync_write(md_path, md)
+    if not quiet:
+        print(f"[ablation-runner] wrote {csv_path}")
+        print(f"[ablation-runner] wrote {md_path}")
     return md
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
     args = build_parser().parse_args(argv)
     cities = args.city or ["beijing"]
-    seeds = resolve_seeds(args.runs, args.seeds)
     root = _ROOT
+    used_cli_seeds = args.seeds is not None
+    seeds = resolve_seeds(root, cities, args.runs, args.seeds)
+    resume_cmd = format_resume_command(
+        cities, args.runs, args.gpu, seeds if used_cli_seeds else None, used_cli_seeds
+    )
+    print(f"[ablation-runner] resume command: {resume_cmd}")
 
     run_suite(
         cities=cities,
@@ -335,6 +475,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         force=args.force,
         dry_run=args.dry_run,
         root=root,
+        resume_cmd=resume_cmd,
     )
     md = write_summaries(root, cities)
     print(md)
