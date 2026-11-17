@@ -184,13 +184,18 @@ class STHGCN(nn.Module):
 
         # Ablation: none — skip all hypergraph message passing.
         if self.hypergraph_edges == 'none':
-            if mode in ('test', 'validate'):
+            # Use the true batch length (last val/test batches may be < eval_batch_size).
+            if label is not None:
+                batch_size = int(label.size(0))
+            elif mode in ('test', 'validate'):
                 batch_size = self.eval_batch_size
             else:
                 batch_size = self.batch_size
             # Mean-pool check-in features into query slots when no edges are used.
             if checkin_feature.size(0) > 0:
-                pooled = checkin_feature.mean(dim=0, keepdim=True).expand(min(batch_size, x.size(0)), -1)
+                pooled = checkin_feature.mean(dim=0, keepdim=True).expand(
+                    min(batch_size, x.size(0)), -1
+                )
                 x = pooled
             else:
                 x = x[:batch_size]
@@ -224,8 +229,21 @@ class STHGCN(nn.Module):
             x_for_time_filter = self.act(x_for_time_filter)
             x_for_time_filter = self.dropout_for_time_filter(x_for_time_filter)
         else:
-            # traj2traj-only: seed query features from zeros (no ci2traj message pass).
-            x_for_time_filter = x.clone()
+            # traj2traj-only: residual skip must match the *actual* query count on this
+            # batch (edge_index[0] dest dim), not configured eval_batch_size. Cloning full
+            # `x` and slicing [:eval_batch_size] left a 64-row skip when out had 40.
+            if data['edge_index'][0] is not None:
+                n_query = data['edge_index'][0].sparse_sizes()[0]
+            elif label is not None:
+                n_query = int(label.size(0))
+            else:
+                n_query = split_idx + 1
+            x_for_time_filter = torch.zeros(
+                n_query,
+                self.checkin_embed_size,
+                device=x.device,
+                dtype=x.dtype,
+            )
 
         if data['edge_index'][-1] is not None and self.do_traj2traj:
             # all conv
@@ -236,6 +254,9 @@ class STHGCN(nn.Module):
                 # For traj2traj-only, skip the first post-filter hop when it is the full ci2traj layer
                 # (have_query_feature=False at idx==0). Keep traj2traj hops (idx>=1).
                 if self.hypergraph_edges == 'traj2traj' and idx == 0:
+                    # Still shrink `x` to this hop's destination count so later traj2traj
+                    # residual layers see traj-sized features (zeros; no ci2traj messages).
+                    x = x[: edge_index.sparse_sizes()[0]]
                     continue
                 edge_time_embed = self.continuous_time_encoder(delta_ts / (60 * 60))
                 if self.distance_encoder_type == 'stan':
@@ -254,14 +275,14 @@ class STHGCN(nn.Module):
                         else:
                             edge_attr_embed = edge_attr.to(torch.float32)
 
+                # Always size the residual query (`x_target` → `x_skip` in conv) by this
+                # hop's destination count. Using configured eval_batch_size broke partial
+                # batches under traj2traj-only (skip 64 vs out 40).
+                n_dst = edge_index.sparse_sizes()[0]
                 if idx == len(data['edge_index']) - 2:
-                    if mode in ('test', 'validate'):
-                        batch_size = self.eval_batch_size
-                    else:
-                        batch_size = self.batch_size
-                    x_target = x_for_time_filter[:batch_size]
+                    x_target = x_for_time_filter[:n_dst]
                 else:
-                    x_target = x[:edge_index.sparse_sizes()[0]]
+                    x_target = x[:n_dst]
 
                 x = self.conv_list[idx](
                     (x, x_target),

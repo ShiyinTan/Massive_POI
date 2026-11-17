@@ -10,7 +10,7 @@ GPU：`conf/std_conf/$city.yml` 里 `run_args.gpu`（`0`=CUDA0）；CLI **`--gpu
 | CLI | 默认 | 作用 |
 |-----|------|------|
 | `--use_user_embed {on,off}` | `on` | `off`：`CheckinEmbedding` 将 user lookup **置零**（仍占 concat 位，但不贡献用户向量）。 |
-| `--hypergraph_edges {both,ci2traj,traj2traj,none}` | `both` | 控制前向消息传递：`both`=ci2traj+traj2traj；`ci2traj`=仅时间掩码后的 check-in→traj；`traj2traj`=跳过 ci2traj 层；`none`=不做超图卷积，对 check-in embed 均值池化后线性打分。 |
+| `--hypergraph_edges {both,ci2traj,traj2traj,none}` | `both` | 控制前向消息传递：`both`=ci2traj+traj2traj；`ci2traj`=仅时间掩码后的 check-in→traj；`traj2traj`=跳过 ci2traj 层；`none`=不做超图卷积，对 check-in embed 均值池化后线性打分。`traj2traj` 的 residual skip（`x_target`→`x_skip`）按 hop 的 `sparse_sizes()[0]` 对齐，避免末 batch 上 `eval_batch_size`（如 64）对上 `out`（如 40）。 |
 | `--graph_scope {full,train}` | `full` | `full`：超图来自 `sample.csv`=train∪val∪test（论文）。`train`：图内保留 train trail + 当前 eval query trail 的 check-in；**traj2traj 邻居仅限 train trail**（val/test 不作邻居）。preprocess 缓存目录会变为 `preprocessed_scope-train_prefix-*`。 |
 | `--unseen_prefix_poi {unk,drop}` | `unk` | `unk`：前缀未见 POI → `padding_poi_id`（论文）。`drop`：若当前 trail **前缀**任一点 POI 不在 train，**丢弃整条 eval 样本**（目标/用户未见过滤仍走 `remove_unseen_user_poi`）。 |
 | `--gpu INT` | yaml | 覆盖 `run_args.gpu`；CPU 用 `-1`。 |
