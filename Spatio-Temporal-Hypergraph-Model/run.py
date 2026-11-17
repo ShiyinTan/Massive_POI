@@ -1,3 +1,4 @@
+import csv
 import logging
 import os
 import os.path as osp
@@ -7,11 +8,30 @@ import random
 from tqdm import tqdm
 from torch.utils.tensorboard import SummaryWriter
 from preprocess import preprocess
-from utils import seed_torch, set_logger, Cfg, count_parameters, test_step, save_model
-from utils.ablation_cli import build_arg_parser, apply_ablation_args
+from utils import seed_torch, set_logger, Cfg, count_parameters, test_step, save_model, get_root_dir
+from utils.ablation_cli import build_arg_parser, apply_ablation_args, ablation_run_name
 from layer import NeighborSampler
 from dataset import LBSNDataset
 from model import STHGCN, SequentialTransformer
+
+
+SUMMARY_CSV_HEADER = [
+    'time', 'city', 'run_name', 'use_user_embed', 'hypergraph_edges',
+    'graph_scope', 'unseen_prefix_poi', 'gpu',
+    'Recall@1', 'Recall@5', 'Recall@10', 'Recall@20', 'MRR', 'log_dir',
+]
+
+
+def append_summary_csv(root_dir, row: dict):
+    """Append one finished-test row to results/summary.csv (create header if missing)."""
+    path = osp.join(root_dir, 'results', 'summary.csv')
+    os.makedirs(osp.dirname(path), exist_ok=True)
+    write_header = not osp.exists(path) or osp.getsize(path) == 0
+    with open(path, 'a', newline='') as f:
+        writer = csv.DictWriter(f, fieldnames=SUMMARY_CSV_HEADER)
+        if write_header:
+            writer.writeheader()
+        writer.writerow({k: row.get(k, '') for k in SUMMARY_CSV_HEADER})
 
 
 if __name__ == '__main__':
@@ -44,20 +64,23 @@ if __name__ == '__main__':
     seed_torch(seed)
 
     current_time = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
-    ablation_tag = (
-        f"user-{args.use_user_embed}_edges-{args.hypergraph_edges}_"
-        f"scope-{args.graph_scope}_prefix-{args.unseen_prefix_poi}"
-    )
-    cfg.run_args.save_path = f'tensorboard/{current_time}/{cfg.dataset_args.dataset_name}/{ablation_tag}'
-    cfg.run_args.log_path = f'log/{current_time}/{cfg.dataset_args.dataset_name}/{ablation_tag}'
+    city = cfg.dataset_args.dataset_name
+    run_name = ablation_run_name(args)
+    # results/<city>/<run_name>/<timestamp>/ — ablation (or paper) visible before timestamp
+    run_dir = osp.join('results', city, run_name, current_time)
+    cfg.run_args.save_path = osp.join(run_dir, 'checkpoints')  # checkpoint.pt
+    cfg.run_args.log_path = osp.join(run_dir, 'log')           # train.log + metrics
+    tb_path = osp.join(run_dir, 'tensorboard')
 
     if not osp.isdir(cfg.run_args.save_path):
         os.makedirs(cfg.run_args.save_path)
     if not osp.isdir(cfg.run_args.log_path):
         os.makedirs(cfg.run_args.log_path)
+    if not osp.isdir(tb_path):
+        os.makedirs(tb_path)
 
     set_logger(cfg.run_args)
-    summary_writer = SummaryWriter(log_dir=cfg.run_args.save_path)
+    summary_writer = SummaryWriter(log_dir=tb_path)
 
     hparam_dict = {}
     for group, hparam in cfg.__dict__.items():
@@ -68,10 +91,12 @@ if __name__ == '__main__':
     hparam_dict['hypergraph_edges'] = args.hypergraph_edges
     hparam_dict['graph_scope'] = args.graph_scope
     hparam_dict['unseen_prefix_poi'] = args.unseen_prefix_poi
+    hparam_dict['run_name'] = run_name
 
     logging.info(
-        f'[Ablation] use_user_embed={args.use_user_embed} hypergraph_edges={args.hypergraph_edges} '
-        f'graph_scope={args.graph_scope} unseen_prefix_poi={args.unseen_prefix_poi}'
+        f'[Ablation] run_name={run_name} use_user_embed={args.use_user_embed} '
+        f'hypergraph_edges={args.hypergraph_edges} graph_scope={args.graph_scope} '
+        f'unseen_prefix_poi={args.unseen_prefix_poi} run_dir={run_dir}'
     )
 
     # Preprocess data
@@ -286,7 +311,10 @@ if __name__ == '__main__':
     if cfg.run_args.do_test:
         logging.info('[Evaluating] Start evaluating on test set...')
 
-        checkpoint = torch.load(osp.join(cfg.run_args.save_path, 'checkpoint.pt'))
+        checkpoint = torch.load(
+            osp.join(cfg.run_args.save_path, 'checkpoint.pt'),
+            map_location=device,
+        )
         model.load_state_dict(checkpoint['model_state_dict'])
         recall_res, ndcg_res, map_res, mrr_res, loss = test_step(model, sampler_test)
         num_params = count_parameters(model)
@@ -309,3 +337,24 @@ if __name__ == '__main__':
         logging.info(f'[Evaluating] Test evaluation result : {metric_dict}')
         summary_writer.add_hparams(hparam_dict, metric_dict)
         summary_writer.close()
+
+        append_summary_csv(
+            get_root_dir(),
+            {
+                'time': current_time,
+                'city': city,
+                'run_name': run_name,
+                'use_user_embed': args.use_user_embed,
+                'hypergraph_edges': args.hypergraph_edges,
+                'graph_scope': args.graph_scope,
+                'unseen_prefix_poi': args.unseen_prefix_poi,
+                'gpu': cfg.run_args.gpu,
+                'Recall@1': recall_res[1],
+                'Recall@5': recall_res[5],
+                'Recall@10': recall_res[10],
+                'Recall@20': recall_res[20],
+                'MRR': mrr_res,
+                'log_dir': run_dir,
+            },
+        )
+        logging.info(f'[Evaluating] Appended row to results/summary.csv (run_dir={run_dir})')

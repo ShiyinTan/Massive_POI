@@ -60,5 +60,25 @@ def apply_ablation_args(cfg, args):
     return cfg
 
 
+def ablation_run_name(args) -> str:
+    """Short run name for output dirs.
+
+    All defaults → ``paper``. Otherwise only non-default tokens, joined by ``__``:
+    ``no_user``, ``edges_ci2traj``, ``edges_traj2traj``, ``edges_none``,
+    ``scope_train``, ``prefix_drop``.
+    """
+    parts = []
+    if getattr(args, "use_user_embed", "on") != "on":
+        parts.append("no_user")
+    edges = getattr(args, "hypergraph_edges", "both")
+    if edges != "both":
+        parts.append(f"edges_{edges}")
+    if getattr(args, "graph_scope", "full") != "full":
+        parts.append("scope_train")
+    if getattr(args, "unseen_prefix_poi", "unk") != "unk":
+        parts.append("prefix_drop")
+    return "paper" if not parts else "__".join(parts)
+
+
 if __name__ == "__main__":
     build_arg_parser().parse_args()
