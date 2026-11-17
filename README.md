@@ -10,4 +10,4 @@ Analysis and experiment notes on [Massive-STEPS](https://github.com/cruiseresear
 
 ## Code
 
-- [`Spatio-Temporal-Hypergraph-Model/`](Spatio-Temporal-Hypergraph-Model/) — Massive-STEPS STHGCN fork with ablation argparse (see `docs/sthgcn-ablation.md`)
+- [`Spatio-Temporal-Hypergraph-Model/`](Spatio-Temporal-Hypergraph-Model/) — Massive-STEPS STHGCN fork with ablation argparse (see `docs/sthgcn-ablation.md`); `data` → `../Massive-STEPS/data`
