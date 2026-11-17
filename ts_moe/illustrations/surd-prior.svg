@@ -1,0 +1,243 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1680" height="1360" viewBox="0 0 1680 1360">
+  <defs>
+    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0 0 L10 5 L0 10 Z" fill="#3d5270"/>
+    </marker>
+    <style>
+      text { font-family: "WenQuanYi Micro Hei", "Droid Sans Fallback", sans-serif; fill: #1c2430; }
+      .title { font-size: 22px; font-weight: 700; }
+      .sub { font-size: 13px; fill: #4a5568; }
+      .pt { font-size: 15px; font-weight: 700; }
+      .h { font-size: 13px; font-weight: 700; }
+      .b { font-size: 12px; }
+      .s { font-size: 11px; fill: #526072; }
+      .cite { font-size: 10px; fill: #8b97a6; }
+      .f { font-size: 12.5px; font-weight: 700; fill: #1d3f66; }
+      .chip { font-size: 11px; font-weight: 700; text-anchor: middle; }
+    </style>
+  </defs>
+  <rect width="1680" height="1360" fill="#ffffff"/>
+  <text class="title" x="32" y="38">离线 SURD prior：每个目标 POI 的 21 维专家质量</text>
+  <text class="sub" x="32" y="64">折 k 只用其他折的 trail 估计；验证和测试用全量训练 trail。这张表缓存后 detach，不进入推荐模型的梯度。</text>
+
+  <!-- A -->
+  <rect x="28" y="84" width="520" height="628" rx="10" fill="#f5f7fb" stroke="#d3dbe6"/>
+  <text class="pt" x="48" y="114">A  交叉拟合</text>
+  <text class="cite" x="168" y="114">estimate_cross_fit_priors</text>
+
+  <rect x="48" y="136" width="480" height="108" rx="8" fill="#ffffff" stroke="#d3dbe6"/>
+  <text class="h" x="64" y="160">按 trail 分折</text>
+  <text class="b" x="64" y="182">fold = md5(seed : trail_id) mod n_folds</text>
+  <text class="b" x="64" y="202">同一条 trail 的窗口进同一折，n_folds = 5</text>
+  <text class="cite" x="64" y="226">dataset/build.py:93  _fold_id</text>
+
+  <line x1="288" y1="244" x2="288" y2="262" stroke="#3d5270" marker-end="url(#arr)"/>
+
+  <rect x="48" y="266" width="480" height="128" rx="8" fill="#ffffff" stroke="#d3dbe6"/>
+  <text class="h" x="64" y="290">折 k 的估计集</text>
+  <text class="b" x="64" y="312">只保留 fold ≠ k 的训练窗口</text>
+  <text class="b" x="64" y="332">该折种子改为 seed + k + 1</text>
+  <text class="b" x="64" y="352">估计集为空时，这一折整表写成 1/21</text>
+  <text class="cite" x="64" y="376">surd/prior.py:125  补集；129  空集均匀</text>
+
+  <line x1="288" y1="394" x2="288" y2="412" stroke="#3d5270" marker-end="url(#arr)"/>
+
+  <rect x="48" y="416" width="480" height="108" rx="8" fill="#ffffff" stroke="#d3dbe6"/>
+  <text class="h" x="64" y="440">验证 / 测试</text>
+  <text class="b" x="64" y="462">全部训练 trail 再估计一次</text>
+  <text class="b" x="64" y="482">得到 full_prior，不用 val / test 标签</text>
+  <text class="cite" x="64" y="506">surd/prior.py:135</text>
+
+  <rect x="48" y="540" width="480" height="148" rx="8" fill="#eef3f9" stroke="#c5d4e6"/>
+  <text class="h" x="64" y="564">两条估计都走出 B → C → D</text>
+  <text class="b" x="64" y="588">fold_priors 形状 [5, n_pois, 21]</text>
+  <text class="b" x="64" y="608">full_prior 形状 [n_pois, 21]</text>
+  <text class="b" x="64" y="628">行 y 是候选 POI，不是用户</text>
+  <text class="b" x="64" y="648">padding 行 y = 0 不作为候选</text>
+  <text class="cite" x="64" y="670">surd/prior.py:137  PriorBundle</text>
+
+  <!-- B -->
+  <rect x="564" y="84" width="1088" height="628" rx="10" fill="#f7f9fc" stroke="#d3dbe6"/>
+  <text class="pt" x="584" y="114">B  特异互信息</text>
+  <text class="cite" x="730" y="114">base.yaml 默认 estimator = neural，d = 32</text>
+
+  <rect x="584" y="132" width="250" height="132" rx="8" fill="#ffffff" stroke="#b7c9de"/>
+  <text class="h" x="600" y="156">U  user</text>
+  <text class="b" x="600" y="178">Embedding(user)</text>
+  <text class="b" x="600" y="198">广播到每个时间步</text>
+  <text class="b" x="600" y="218">masked mean → h_U</text>
+  <text class="cite" x="600" y="246">estimators.py:164</text>
+
+  <rect x="848" y="132" width="250" height="132" rx="8" fill="#ffffff" stroke="#b7c9de"/>
+  <text class="h" x="864" y="156">P  POI</text>
+  <text class="b" x="864" y="178">Embedding(poi_t)</text>
+  <text class="b" x="864" y="198">padding 位不参与</text>
+  <text class="b" x="864" y="218">masked mean → h_P</text>
+  <text class="cite" x="864" y="246">estimators.py:165</text>
+
+  <rect x="1112" y="132" width="250" height="132" rx="8" fill="#ffffff" stroke="#b7c9de"/>
+  <text class="h" x="1128" y="156">T  time</text>
+  <text class="b" x="1128" y="178">Emb(hour) + Emb(dow)</text>
+  <text class="b" x="1128" y="198">hour 24 类，dow 7 类</text>
+  <text class="b" x="1128" y="218">masked mean → h_T</text>
+  <text class="cite" x="1128" y="246">estimators.py:166</text>
+
+  <rect x="1376" y="132" width="252" height="132" rx="8" fill="#ffffff" stroke="#b7c9de"/>
+  <text class="h" x="1392" y="156">L  location</text>
+  <text class="b" x="1392" y="178">Linear(2 → d)</text>
+  <text class="b" x="1392" y="198">输入是标准化经纬度</text>
+  <text class="b" x="1392" y="218">masked mean → h_L</text>
+  <text class="cite" x="1392" y="246">estimators.py:167</text>
+
+  <line x1="709" y1="264" x2="709" y2="278" stroke="#3d5270"/>
+  <line x1="973" y1="264" x2="973" y2="278" stroke="#3d5270"/>
+  <line x1="1237" y1="264" x2="1237" y2="278" stroke="#3d5270"/>
+  <line x1="1502" y1="264" x2="1502" y2="278" stroke="#3d5270"/>
+  <line x1="709" y1="278" x2="1502" y2="278" stroke="#3d5270"/>
+  <line x1="1105" y1="278" x2="1105" y2="292" stroke="#3d5270" marker-end="url(#arr)"/>
+
+  <rect x="584" y="296" width="1044" height="72" rx="8" fill="#ffffff" stroke="#b7c9de"/>
+  <text class="h" x="600" y="320">15 个子集头，A 取 {U, P, T, L} 的全部非空子集</text>
+  <text class="b" x="600" y="344">concat(h_s, s ∈ A) → Linear(|A|·d, d) → GELU → Linear(d, d) → h_A</text>
+  <text class="cite" x="1288" y="348">estimators.py:153</text>
+
+  <rect x="584" y="384" width="512" height="148" rx="8" fill="#ffffff" stroke="#d3dbe6"/>
+  <text class="h" x="600" y="408">拟合：内部 hold-in trail</text>
+  <text class="b" x="600" y="430">按 trail 留出 20% 做读出，不在同一批样本上读 MI</text>
+  <text class="b" x="600" y="450">15 个头的交叉熵相加，训练 5 个 epoch</text>
+  <text class="b" x="600" y="470">词表 ≤ 4096：全词表 softmax，mask 掉 id 0</text>
+  <text class="b" x="600" y="490">否则：64 个负样本，正样本放在第 0 列</text>
+  <text class="cite" x="600" y="514">estimators.py:260 划分；278 损失</text>
+
+  <rect x="1116" y="384" width="512" height="148" rx="8" fill="#ffffff" stroke="#d3dbe6"/>
+  <text class="h" x="1132" y="408">读出：hold-out trail</text>
+  <text class="b" x="1132" y="430">无论训练是否采样，读出都用分块全词表</text>
+  <text class="f" x="1132" y="454">log P(y | Q_A) = h_A · e_y − log Z</text>
+  <text class="b" x="1132" y="476">再减去拟合集上的 log P(y)</text>
+  <text class="b" x="1132" y="496">e_y 是 out_emb，与推荐模型的 POI 表无关</text>
+  <text class="cite" x="1132" y="514">estimators.py:177  log_prob_true；312</text>
+
+  <rect x="584" y="548" width="1044" height="64" rx="8" fill="#e8f0f8" stroke="#b7c9de"/>
+  <text class="f" x="600" y="574">i(y; Q_A) = 平均 [ log P(y|Q_A) − log P(y) ]，只对读出样本里 Y = y 的那些</text>
+  <text class="s" x="600" y="596">没出现的 POI 与 padding 保持 0。n_y 是进入这个平均的样本数。  specific_mi.py:37</text>
+
+  <rect x="584" y="624" width="1044" height="72" rx="8" fill="#fbf7f1" stroke="#e0d2bc" stroke-dasharray="5 4"/>
+  <text class="h" x="600" y="648">另一条支路：estimator = discrete（smoke，不是默认）</text>
+  <text class="b" x="600" y="670">最后一步的 user、POI、hour，以及 8×8 空间网格。平滑计数 (n + α P(y)) / (n_state + α)，α = 1。</text>
+  <text class="cite" x="600" y="688">estimators.py:119  同一估计切片上直接平均，没有内层 hold-out</text>
+
+  <!-- C -->
+  <rect x="28" y="728" width="820" height="392" rx="10" fill="#fbf8f3" stroke="#e4d8c4"/>
+  <text class="pt" x="48" y="758">C  单调投影，再分配 SURD 原子</text>
+  <text class="cite" x="360" y="758">不乘 P(Y = y)</text>
+
+  <rect x="48" y="778" width="380" height="188" rx="8" fill="#ffffff" stroke="#e4d8c4"/>
+  <text class="h" x="64" y="802">先投影，再分解</text>
+  <text class="f" x="64" y="828">投影后 i(A) = max(0, max over B⊆A of i(B))</text>
+  <text class="b" x="64" y="854">空集记 0</text>
+  <text class="b" x="64" y="876">超集不能小于它的任何一个子集</text>
+  <text class="b" x="64" y="898">每个 POI 单独做，共 n_pois 行</text>
+  <text class="cite" x="64" y="944">specific_mi.py:60  enforce_subset_monotonicity</text>
+
+  <rect x="444" y="778" width="380" height="188" rx="8" fill="#ffffff" stroke="#e4d8c4"/>
+  <text class="h" x="460" y="802">按特异信息从小到大入账</text>
+  <text class="b" x="460" y="826">接近的值，较小子集排前面</text>
+  <text class="b" x="460" y="848">比上一层最大值还小的超集先剪成 0</text>
+  <text class="b" x="460" y="870">增量从 0 起累加</text>
+  <text class="b" x="460" y="892">原子之和等于剪裁后的最大子集 MI</text>
+  <text class="cite" x="460" y="944">decomposition.py:90  _order；100  弱超集</text>
+
+  <rect x="48" y="982" width="776" height="118" rx="8" fill="#ffffff" stroke="#e4d8c4"/>
+  <text class="h" x="64" y="1006">增量记到哪一类</text>
+  <text class="b" x="64" y="1030">子集只有 1 个源：记入当前冗余池。池里只剩这一个源 → unique；否则 → 这个池的 redundancy。然后把该源移出池。</text>
+  <text class="b" x="64" y="1052">子集有 2 个及以上源：整笔增量记入该子集的 synergy。</text>
+  <text class="cite" x="64" y="1078">decomposition.py:114  单源；122  多源。这不是 15 个子集 MI 的容斥。</text>
+
+  <!-- D -->
+  <rect x="864" y="728" width="788" height="392" rx="10" fill="#f4f8f6" stroke="#c9ddd0"/>
+  <text class="pt" x="884" y="758">D  收成 21 列，再按 n_y 收缩</text>
+  <text class="cite" x="1208" y="758">atoms_to_expert_mass → routing_distribution</text>
+
+  <text class="s" x="884" y="788">unique</text>
+  <rect x="884" y="796" width="52" height="28" rx="4" fill="#d9ead3" stroke="#6aa84f"/>
+  <rect x="942" y="796" width="52" height="28" rx="4" fill="#d9ead3" stroke="#6aa84f"/>
+  <rect x="1000" y="796" width="52" height="28" rx="4" fill="#d9ead3" stroke="#6aa84f"/>
+  <rect x="1058" y="796" width="52" height="28" rx="4" fill="#d9ead3" stroke="#6aa84f"/>
+  <text class="chip" x="910" y="815">U</text>
+  <text class="chip" x="968" y="815">P</text>
+  <text class="chip" x="1026" y="815">T</text>
+  <text class="chip" x="1084" y="815">L</text>
+  <text class="s" x="1128" y="815">列 0–3，直接拷贝 unique 原子</text>
+
+  <text class="s" x="884" y="848">redundancy</text>
+  <rect x="884" y="856" width="58" height="28" rx="4" fill="#fce5cd" stroke="#e69138"/>
+  <rect x="948" y="856" width="58" height="28" rx="4" fill="#fce5cd" stroke="#e69138"/>
+  <rect x="1012" y="856" width="58" height="28" rx="4" fill="#fce5cd" stroke="#e69138"/>
+  <rect x="1076" y="856" width="58" height="28" rx="4" fill="#fce5cd" stroke="#e69138"/>
+  <rect x="1140" y="856" width="58" height="28" rx="4" fill="#fce5cd" stroke="#e69138"/>
+  <rect x="1204" y="856" width="58" height="28" rx="4" fill="#fce5cd" stroke="#e69138"/>
+  <text class="chip" x="913" y="875">R_UP</text>
+  <text class="chip" x="977" y="875">R_UT</text>
+  <text class="chip" x="1041" y="875">R_UL</text>
+  <text class="chip" x="1105" y="875">R_PT</text>
+  <text class="chip" x="1169" y="875">R_PL</text>
+  <text class="chip" x="1233" y="875">R_TL</text>
+  <text class="s" x="884" y="906">列 4–9。池大小大于 2 时，质量均分到池内的 pair，冗余总量不变。</text>
+
+  <text class="s" x="884" y="930">synergy</text>
+  <rect x="884" y="938" width="62" height="26" rx="4" fill="#cfe2f3" stroke="#3d85c6"/>
+  <rect x="950" y="938" width="62" height="26" rx="4" fill="#cfe2f3" stroke="#3d85c6"/>
+  <rect x="1016" y="938" width="62" height="26" rx="4" fill="#cfe2f3" stroke="#3d85c6"/>
+  <rect x="1082" y="938" width="62" height="26" rx="4" fill="#cfe2f3" stroke="#3d85c6"/>
+  <rect x="1148" y="938" width="62" height="26" rx="4" fill="#cfe2f3" stroke="#3d85c6"/>
+  <rect x="1214" y="938" width="62" height="26" rx="4" fill="#cfe2f3" stroke="#3d85c6"/>
+  <rect x="1280" y="938" width="68" height="26" rx="4" fill="#cfe2f3" stroke="#3d85c6"/>
+  <rect x="1352" y="938" width="68" height="26" rx="4" fill="#cfe2f3" stroke="#3d85c6"/>
+  <rect x="1424" y="938" width="68" height="26" rx="4" fill="#cfe2f3" stroke="#3d85c6"/>
+  <rect x="1496" y="938" width="68" height="26" rx="4" fill="#cfe2f3" stroke="#3d85c6"/>
+  <rect x="1568" y="938" width="68" height="26" rx="4" fill="#cfe2f3" stroke="#3d85c6"/>
+  <text class="chip" x="915" y="956">S_UP</text>
+  <text class="chip" x="981" y="956">S_UT</text>
+  <text class="chip" x="1047" y="956">S_UL</text>
+  <text class="chip" x="1113" y="956">S_PT</text>
+  <text class="chip" x="1179" y="956">S_PL</text>
+  <text class="chip" x="1245" y="956">S_TL</text>
+  <text class="chip" x="1314" y="956">S_UPT</text>
+  <text class="chip" x="1386" y="956">S_UPL</text>
+  <text class="chip" x="1458" y="956">S_UTL</text>
+  <text class="chip" x="1530" y="956">S_PTL</text>
+  <text class="chip" x="1602" y="956">S_UPTL</text>
+
+  <rect x="884" y="978" width="748" height="124" rx="8" fill="#ffffff" stroke="#c9ddd0"/>
+  <text class="b" x="900" y="1002">1  丢掉负值。正质量和为 0 的行先当成均匀 1/21，表示没有偏好。</text>
+  <text class="b" x="900" y="1024">2  R_global 是按 n_y 加权的行平均。c_y = n_y / (n_y + κ)，κ = 10。</text>
+  <text class="f" x="900" y="1048">R_y = c_y · own_y + (1 − c_y) · R_global，然后再归一化</text>
+  <text class="s" x="900" y="1072">没见过的 POI：c_y = 0，整行用 R_global。padding 行也写成 R_global。</text>
+  <text class="cite" x="900" y="1088">specific_mi.py:99  起；atoms.py:123  高阶冗余均分</text>
+
+  <!-- E -->
+  <rect x="28" y="1136" width="1624" height="196" rx="10" fill="#f6f7f9" stroke="#d3dbe6"/>
+  <text class="pt" x="48" y="1166">E  缓存之后怎么进推荐模型</text>
+  <text class="s" x="340" y="1166">推理打分和训练用同一行先验；KL 只在训练、且 routing_mode = surd 时计算</text>
+
+  <rect x="48" y="1186" width="500" height="124" rx="8" fill="#ffffff" stroke="#d3dbe6"/>
+  <text class="h" x="64" y="1210">查表</text>
+  <text class="b" x="64" y="1234">训练：折 k 读 fold_priors[k, 候选 id]</text>
+  <text class="b" x="64" y="1254">每个候选用自己的行，不只查正样本</text>
+  <text class="b" x="64" y="1274">验证 / 测试读 full_prior</text>
+  <text class="cite" x="64" y="1294">training/loop.py:144</text>
+
+  <rect x="564" y="1186" width="520" height="124" rx="8" fill="#ffffff" stroke="#d3dbe6"/>
+  <text class="h" x="580" y="1210">先切断梯度，再加到门控</text>
+  <text class="f" x="580" y="1236">logits = g(z, q_y) + 0.1 * W_r r_y</text>
+  <text class="b" x="580" y="1260">pi = softmax(logits / temperature)，r_y 就是 R_y</text>
+  <text class="b" x="580" y="1280">0.1 是 guidance_scale，不是 KL 的权重</text>
+  <text class="cite" x="580" y="1294">model/ts_moe.py:245 detach；66  prior_map</text>
+
+  <rect x="1100" y="1186" width="528" height="124" rx="8" fill="#ffffff" stroke="#d3dbe6"/>
+  <text class="h" x="1116" y="1210">同一行还是训练目标 π*</text>
+  <text class="b" x="1116" y="1234">surd 模式：KL( stopgrad(pi*) || pi )</text>
+  <text class="b" x="1116" y="1254">负载均衡的目标也是这些候选行的平均</text>
+  <text class="b" x="1116" y="1274">variant 4 或 10 时先切列，再在剩余专家上归一化</text>
+  <text class="cite" x="1116" y="1294">losses.py:56；prior.py:144  slice_prior</text>
+</svg>
