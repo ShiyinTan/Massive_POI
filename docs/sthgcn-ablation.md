@@ -51,9 +51,24 @@ time,city,run_name,use_user_embed,hypergraph_edges,graph_scope,unseen_prefix_poi
 20261117_194500,beijing,no_user,off,both,full,unk,-1,0.410,0.600,0.700,0.780,0.500,results/beijing/no_user/20261117_194500
 ```
 
-同 city+run_name 不同时间戳各占一行，不覆盖。
+同 city+run_name 不同时间戳各占一行，不覆盖。`summary.csv` 另含 `seed`（runner / `--seed` 用）。
 
-## 命令（CPU · 四城 · 勿省略 `--gpu -1`）
+## 批量消融 runner（mean±std）
+
+一键跑完整 suite（`paper` + 六个单因素：`no_user` / `edges_*` / `scope_train` / `prefix_drop`），每配置 `--runs` 次不同 seed，结束后写：
+
+- `results/ablation_summary.csv` — 每行 `city+run_name`：`n` 与 Recall@1/5/10/20、MRR 的 mean / sample std（`ddof=1`；`n=1` 时 std 留空）
+- `results/ablation_summary.md` — 按城一张表（`paper` 行在前），单元格为 `mean±std`（由 csv 生成）
+
+```bash
+cd Spatio-Temporal-Hypergraph-Model
+# beijing · 5 seeds · GPU 用 yaml（不传 --gpu；不改 CUDA_VISIBLE_DEVICES）
+python3 scripts/run_ablations.py --city beijing --runs 5
+# 论文单 seed：python3 scripts/run_ablations.py --city beijing --runs 1 --seeds 54607333
+# 已有 city+run_name+seed 的 summary 行会 skip（--force 重跑）
+```
+
+## 单次命令（CPU · 四城 · 勿省略 `--gpu -1`）
 
 `Spatio-Temporal-Hypergraph-Model/data` → `../Massive-STEPS/data`（相对 symlink）；把 HF 的 `{city}_checkins_{train,validation,test}.csv` 放到 `Massive-STEPS/data/<city>/`（该目录下 `*.csv` 已 gitignore，勿提交）。
 
@@ -84,6 +99,6 @@ python3 run.py -f std_conf/${city}.yml --gpu -1 --unseen_prefix_poi unk
 python3 run.py -f std_conf/${city}.yml --gpu -1 --unseen_prefix_poi drop
 ```
 
-验证 CLI：`python3 utils/ablation_cli.py -h`（不加载 PyG）。
+验证 CLI：`python3 utils/ablation_cli.py -h` / `python3 scripts/run_ablations.py -h`（不加载 PyG）。
 
-实现入口：`utils/ablation_cli.py`（`ablation_run_name`）→ `run.py` → `CheckinEmbedding` / `STHGCN.forward` / `preprocess_main` / `generate_hypergraph`（`neighbor_traj_ids`）。
+实现入口：`scripts/run_ablations.py` → `utils/ablation_cli.py`（`ablation_run_name`）→ `run.py` → `CheckinEmbedding` / `STHGCN.forward` / `preprocess_main` / `generate_hypergraph`（`neighbor_traj_ids`）。
