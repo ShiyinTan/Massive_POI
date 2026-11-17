@@ -11,6 +11,7 @@ log/
 checkpoint/
 tensorboard/
 logs/
+results/
 test/
 .idea/
 
