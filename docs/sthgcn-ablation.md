@@ -64,6 +64,9 @@ time,city,run_name,use_user_embed,hypergraph_edges,graph_scope,unseen_prefix_poi
 
 - `results/ablation_summary.csv` — 每行 `city+run_name`：`n` 与 Recall@1/5/10/20、MRR 的 mean / sample std（`ddof=1`；`n=1` 时 std 留空；`n`=已完成 seed 数）
 - `results/ablation_summary.md` — 按城一张表（`paper` 行在前），单元格为 `mean±std`（由 csv 生成）
+- **Keep-history：** 重建 `ablation_summary.{csv,md}` 时只更新本次 invocation 涉及的 `city+run_name`（从完整 `summary.csv` 重算 mean/std）；其它城/配置行保留，不截断 `summary.csv`。
+
+`--city` 可重复，接受全部 15 个 Massive-STEPS 城名（缺 `conf/std_conf/<city>.yml` 则硬失败）。默认省略时仍为 `beijing`。
 
 ```bash
 cd Spatio-Temporal-Hypergraph-Model
@@ -71,6 +74,8 @@ cd Spatio-Temporal-Hypergraph-Model
 python3 scripts/run_ablations.py --city beijing --runs 5
 # 中断后直接再跑同一条命令即可 resume；论文单 seed：--runs 1 --seeds 54607333
 # --force 忽略已有 summary 行全部重跑
+# 十五城（每城拼一次 --city）：
+# python3 scripts/run_ablations.py --city bandung --city beijing --city istanbul --city jakarta --city kuwait_city --city melbourne --city moscow --city new_york --city palembang --city petaling_jaya --city sao_paulo --city shanghai --city sydney --city tangerang --city tokyo --runs 5
 ```
 
 ## 单次命令（CPU · 四城 · 勿省略 `--gpu -1`）
@@ -112,6 +117,7 @@ python3 run.py -f std_conf/${city}.yml --gpu -1 --late_sequence location
 ```
 
 验证 CLI：`python3 utils/ablation_cli.py -h` / `python3 scripts/run_ablations.py -h`（不加载 PyG）。  
-形状自检（无 HF / 无 PyG）：`python3 scripts/check_modality_fusion_shapes.py`。
+形状自检（无 HF / 无 PyG）：`python3 scripts/check_modality_fusion_shapes.py`。  
+Runner 自检（城名 + summary merge）：`python3 scripts/check_ablation_runner_cities_merge.py`。
 
 实现入口：`scripts/run_ablations.py` → `utils/ablation_cli.py`（`ablation_run_name`）→ `run.py` → `CheckinEmbedding` / `STHGCN.forward` / `preprocess_main` / `generate_hypergraph`（`neighbor_traj_ids`）。
