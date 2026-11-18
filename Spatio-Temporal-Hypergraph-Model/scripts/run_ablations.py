@@ -51,6 +51,7 @@ ABLATION_SUITE: List[Tuple[str, Dict[str, str]]] = [
     ("edges_none", {"hypergraph_edges": "none"}),
     ("scope_train", {"graph_scope": "train"}),
     ("prefix_drop", {"unseen_prefix_poi": "drop"}),
+    ("fusion_late", {"modality_fusion": "late"}),
 ]
 SUITE_ORDER = [name for name, _ in ABLATION_SUITE]
 
@@ -106,6 +107,7 @@ class _FlagNS:
         self.hypergraph_edges = flags.get("hypergraph_edges", "both")
         self.graph_scope = flags.get("graph_scope", "full")
         self.unseen_prefix_poi = flags.get("unseen_prefix_poi", "unk")
+        self.modality_fusion = flags.get("modality_fusion", "early")
 
 
 def draw_seeds(n: int, rng: Optional[random.Random] = None) -> List[int]:

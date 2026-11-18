@@ -17,7 +17,7 @@ from model import STHGCN, SequentialTransformer
 
 SUMMARY_CSV_HEADER = [
     'time', 'city', 'run_name', 'seed', 'use_user_embed', 'hypergraph_edges',
-    'graph_scope', 'unseen_prefix_poi', 'gpu',
+    'graph_scope', 'unseen_prefix_poi', 'modality_fusion', 'gpu',
     'Recall@1', 'Recall@5', 'Recall@10', 'Recall@20', 'MRR', 'log_dir',
 ]
 
@@ -112,12 +112,14 @@ if __name__ == '__main__':
     hparam_dict['hypergraph_edges'] = args.hypergraph_edges
     hparam_dict['graph_scope'] = args.graph_scope
     hparam_dict['unseen_prefix_poi'] = args.unseen_prefix_poi
+    hparam_dict['modality_fusion'] = args.modality_fusion
     hparam_dict['run_name'] = run_name
 
     logging.info(
         f'[Ablation] run_name={run_name} use_user_embed={args.use_user_embed} '
         f'hypergraph_edges={args.hypergraph_edges} graph_scope={args.graph_scope} '
-        f'unseen_prefix_poi={args.unseen_prefix_poi} run_dir={run_dir}'
+        f'unseen_prefix_poi={args.unseen_prefix_poi} '
+        f'modality_fusion={args.modality_fusion} run_dir={run_dir}'
     )
 
     # Preprocess data
@@ -370,6 +372,7 @@ if __name__ == '__main__':
                 'hypergraph_edges': args.hypergraph_edges,
                 'graph_scope': args.graph_scope,
                 'unseen_prefix_poi': args.unseen_prefix_poi,
+                'modality_fusion': args.modality_fusion,
                 'gpu': cfg.run_args.gpu,
                 'Recall@1': recall_res[1],
                 'Recall@5': recall_res[5],

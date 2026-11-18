@@ -38,6 +38,29 @@ class CheckinEmbedding(nn.Module):
         else:
             raise ValueError(f"Get wrong fusion type {self.fusion_type}")
 
+    def forward_modalities(self, data):
+        """Return per-modality embeddings (each ``embed_size``) for late fusion.
+
+        P=POI, C=category, T=weekday+hour (sum), L=raw lon/lat (caller projects),
+        user=user lookup (may be zeroed when ``use_user_embed`` is False).
+        """
+        user_emb = self.user_embedding(data[..., 0].long())
+        if not self.use_user_embed:
+            user_emb = torch.zeros_like(user_emb)
+        poi_emb = self.poi_embedding(data[..., 1].long())
+        cat_emb = self.category_embedding(data[..., 2].long())
+        time_emb = self.dayofweek_embedding(data[..., 6].long()) + self.hourofday_embedding(
+            data[..., 7].long()
+        )
+        loc_raw = data[..., 4:6].to(dtype=poi_emb.dtype)
+        return {
+            "user": user_emb,
+            "P": poi_emb,
+            "C": cat_emb,
+            "T": time_emb,
+            "L_raw": loc_raw,
+        }
+
     def forward(self, data):
         user_emb = self.user_embedding(data[..., 0].long())
         if not self.use_user_embed:
