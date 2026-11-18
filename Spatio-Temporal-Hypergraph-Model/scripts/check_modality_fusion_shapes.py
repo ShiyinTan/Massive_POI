@@ -1,16 +1,19 @@
 #!/usr/bin/env python3
-"""Shape check for early vs late modality fusion (no HF data / no PyG).
+"""Shape check for single-sequence late pull-out (no HF data / no PyG).
 
-Early (paper): CheckinEmbedding concat → mean-pool → Linear → [B, num_poi].
-Late: P/C/T/L each kept at embed_size through a stand-in encoder, then
-concat(+user) → MLP → [B, num_poi]. Stand-in encoder is mean-pool (same as
-hypergraph_edges=none); real late path uses HypergraphTransformer stacks.
+``late_sequence=none`` (paper): CheckinEmbedding concat → mean-pool → Linear →
+``[B, num_poi]`` (no extra MLP).
+
+``late_sequence`` in {poi, category, time, location}: remaining modalities stay
+on the paper fused path (pulled P/C/T slots zeroed); the pulled sequence goes
+through a stand-in encoder at ``embed_size``; concat(main, pulled) → MLP →
+``[B, num_poi]``. Stand-in encoder is mean-pool (same as hypergraph_edges=none);
+the real path uses HypergraphTransformer stacks.
 """
 from __future__ import annotations
 
 import importlib.util as ilu
 import os.path as osp
-import sys
 
 import torch
 from torch import nn
@@ -42,7 +45,22 @@ def _tiny_dataset_args():
     return NS()
 
 
-def early_logits(checkin_emb: nn.Module, x_ci: torch.Tensor, batch_size: int, num_poi: int):
+def _ns(**kwargs):
+    class NS:
+        pass
+
+    obj = NS()
+    obj.use_user_embed = "on"
+    obj.hypergraph_edges = "both"
+    obj.graph_scope = "full"
+    obj.unseen_prefix_poi = "unk"
+    obj.late_sequence = "none"
+    for k, v in kwargs.items():
+        setattr(obj, k, v)
+    return obj
+
+
+def paper_logits(checkin_emb: nn.Module, x_ci: torch.Tensor, batch_size: int, num_poi: int):
     fused = checkin_emb(x_ci)  # [N_ci, 5D]
     assert fused.size(-1) == 5 * checkin_emb.embed_size
     pooled = fused.mean(dim=0, keepdim=True).expand(batch_size, -1)
@@ -50,23 +68,33 @@ def early_logits(checkin_emb: nn.Module, x_ci: torch.Tensor, batch_size: int, nu
     return scorer(pooled)
 
 
-def late_logits(checkin_emb: nn.Module, x_ci: torch.Tensor, batch_size: int, num_poi: int):
-    mods = checkin_emb.forward_modalities(x_ci)
+def late_one_logits(
+    checkin_emb: nn.Module,
+    x_ci: torch.Tensor,
+    batch_size: int,
+    num_poi: int,
+    late_sequence: str,
+):
     d = checkin_emb.embed_size
-    loc_proj = nn.Linear(2, d)
-    loc = loc_proj(mods["L_raw"])
+    exclude = late_sequence if late_sequence in ("poi", "category", "time") else None
+    main = checkin_emb(x_ci, exclude=exclude)
+    assert main.size(-1) == 5 * d
+    main_q = main.mean(dim=0, keepdim=True).expand(batch_size, -1)
 
-    def encode(feat: torch.Tensor) -> torch.Tensor:
-        # Stand-in for one HypergraphTransformer stack (edges=none mean-pool).
-        return feat.mean(dim=0, keepdim=True).expand(batch_size, -1)
-
-    p, c, t, l = encode(mods["P"]), encode(mods["C"]), encode(mods["T"]), encode(loc)
-    user_q = encode(mods["user"])
-    for tns in (p, c, t, l, user_q):
-        assert tns.shape == (batch_size, d), tns.shape
-    fused = torch.cat([p, c, t, l, user_q], dim=-1)
-    assert fused.size(-1) == 5 * d
-    mlp = nn.Sequential(nn.Linear(5 * d, 5 * d), nn.ReLU(), nn.Linear(5 * d, num_poi))
+    pulled = checkin_emb.sequence_feature(x_ci, late_sequence)
+    if late_sequence == "location":
+        assert pulled.size(-1) == 2
+        pulled = nn.Linear(2, d)(pulled)
+    else:
+        assert pulled.size(-1) == d
+    late_q = pulled.mean(dim=0, keepdim=True).expand(batch_size, -1)
+    fused = torch.cat([main_q, late_q], dim=-1)
+    assert fused.size(-1) == 5 * d + d
+    mlp = nn.Sequential(
+        nn.Linear(5 * d + d, 5 * d + d),
+        nn.ReLU(),
+        nn.Linear(5 * d + d, num_poi),
+    )
     return mlp(fused)
 
 
@@ -75,32 +103,20 @@ def main() -> int:
     emb_mod = _load("embedding_layer_standalone", _LAYER)
     cli = _load("ablation_cli_standalone", _CLI)
 
-    # run_name token
-    class NS:
-        pass
-
-    early_ns = NS()
-    early_ns.use_user_embed = "on"
-    early_ns.hypergraph_edges = "both"
-    early_ns.graph_scope = "full"
-    early_ns.unseen_prefix_poi = "unk"
-    early_ns.modality_fusion = "early"
-    assert cli.ablation_run_name(early_ns) == "paper"
-
-    late_ns = NS()
-    late_ns.use_user_embed = "on"
-    late_ns.hypergraph_edges = "both"
-    late_ns.graph_scope = "full"
-    late_ns.unseen_prefix_poi = "unk"
-    late_ns.modality_fusion = "late"
-    assert cli.ablation_run_name(late_ns) == "fusion_late"
+    assert cli.ablation_run_name(_ns()) == "paper"
+    for seq, token in (
+        ("poi", "late_poi"),
+        ("category", "late_category"),
+        ("time", "late_time"),
+        ("location", "late_location"),
+    ):
+        assert cli.ablation_run_name(_ns(late_sequence=seq)) == token, seq
 
     ds = _tiny_dataset_args()
     embed_size = 4
     num_poi = ds.num_poi
     n_ci = 12
     batch_size = 3
-    # columns: user, poi, cat, ?, lon, lat, weekday, hour
     x_ci = torch.zeros(n_ci, 8)
     x_ci[:, 0] = torch.randint(1, ds.num_user + 1, (n_ci,))
     x_ci[:, 1] = torch.randint(1, ds.num_poi + 1, (n_ci,))
@@ -117,16 +133,34 @@ def main() -> int:
         use_user_embed=True,
     )
 
-    early_out = early_logits(checkin_emb, x_ci, batch_size, num_poi)
-    late_out = late_logits(checkin_emb, x_ci, batch_size, num_poi)
-    assert early_out.shape == (batch_size, num_poi), early_out.shape
-    assert late_out.shape == (batch_size, num_poi), late_out.shape
-    assert early_out.shape == late_out.shape
+    paper_out = paper_logits(checkin_emb, x_ci, batch_size, num_poi)
+    assert paper_out.shape == (batch_size, num_poi), paper_out.shape
+
+    for seq in ("poi", "category", "time", "location"):
+        late_out = late_one_logits(checkin_emb, x_ci, batch_size, num_poi, seq)
+        assert late_out.shape == (batch_size, num_poi), (seq, late_out.shape)
+        assert late_out.shape == paper_out.shape
+
+    # Pulled P/C/T slots are zeroed on the fused path; location does not change concat.
+    full = checkin_emb(x_ci)
+    for seq, slice_ in (
+        ("poi", slice(embed_size, 2 * embed_size)),
+        ("category", slice(2 * embed_size, 3 * embed_size)),
+        ("time", slice(3 * embed_size, 5 * embed_size)),
+    ):
+        excl = checkin_emb(x_ci, exclude=seq)
+        assert torch.allclose(excl[..., slice_], torch.zeros_like(excl[..., slice_]))
+        # Other slots match the paper concat.
+        keep = [i for i in range(5 * embed_size) if i not in range(slice_.start, slice_.stop)]
+        assert torch.allclose(excl[..., keep], full[..., keep])
+
+    loc_excl = checkin_emb(x_ci, exclude="location")
+    assert torch.allclose(loc_excl, full)
 
     print(
-        f"MODALITY_FUSION_SHAPE_OK: early={tuple(early_out.shape)} "
-        f"late={tuple(late_out.shape)} (POI-class logits); "
-        f"run_name late→fusion_late."
+        f"LATE_SEQUENCE_SHAPE_OK: paper={tuple(paper_out.shape)}; "
+        f"late_poi/category/time/location each={tuple(paper_out.shape)} "
+        f"(POI-class logits); run_name tokens late_*."
     )
     return 0
 

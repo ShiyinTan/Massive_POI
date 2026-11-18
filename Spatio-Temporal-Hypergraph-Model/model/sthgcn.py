@@ -12,6 +12,20 @@ from layer import (
 
 
 class STHGCN(nn.Module):
+    """STHGCN with optional single-sequence late pull-out.
+
+    Default (``late_sequence=none``): paper path — CheckinEmbedding concat → one
+    HypergraphTransformer stack → Linear → POI logits.
+
+    Ablation (``poi`` / ``category`` / ``time`` / ``location``): that one sequence
+    is encoded on its own HG stack; the others stay on the paper fused path
+    (pulled P/C/T slots zeroed in the early concat; location was never in it).
+    Just before softmax: concat(main_rep, pulled_rep) → MLP → POI logits.
+    User embedding always stays on the fused path.
+    """
+
+    LATE_CHOICES = ('poi', 'category', 'time', 'location')
+
     def __init__(self, cfg):
         super(STHGCN, self).__init__()
         self.device = cfg.run_args.device
@@ -21,10 +35,11 @@ class STHGCN(nn.Module):
         self.hypergraph_edges = getattr(cfg.model_args, 'hypergraph_edges', 'both')
         self.do_traj2traj = bool(cfg.model_args.do_traj2traj) and self.hypergraph_edges in ('both', 'traj2traj')
         self.do_ci2traj = self.hypergraph_edges in ('both', 'ci2traj')
-        # Ablation: modality_fusion in {early, late}; default early = paper CheckinEmbedding concat.
-        self.modality_fusion = getattr(cfg.model_args, 'modality_fusion', 'early')
-        if isinstance(self.modality_fusion, str):
-            self.modality_fusion = self.modality_fusion.lower()
+        # Ablation: late_sequence in {none, poi, category, time, location}; default none.
+        late_sequence = getattr(cfg.model_args, 'late_sequence', 'none')
+        if isinstance(late_sequence, str):
+            late_sequence = late_sequence.lower()
+        self.late_sequence = late_sequence
         self.distance_encoder_type = cfg.model_args.distance_encoder_type
         self.dropout_rate = cfg.model_args.dropout_rate
         self.generate_edge_attr = cfg.model_args.generate_edge_attr
@@ -52,88 +67,103 @@ class STHGCN(nn.Module):
         else:
             self.act = torch.tanh
 
-        self.cfg_conv_args = cfg.conv_args
-        self.cfg_model_args = cfg.model_args
-        self.cfg_dataset_args = cfg.dataset_args
+        # Paper / fused path: always present (same tensors when late_sequence=none).
+        self.checkin_embed_size = self.checkin_embedding_layer.output_embed_size
+        continuous_encoder_dim = (
+            self.checkin_embed_size
+            if cfg.conv_args.time_fusion_mode == 'add'
+            else cfg.model_args.st_embed_size
+        )
+        main_stack = self._build_hg_stack(self.checkin_embed_size, continuous_encoder_dim, cfg)
+        self.conv_for_time_filter = main_stack['conv_for_time_filter']
+        self.norms_for_time_filter = main_stack['norms_for_time_filter']
+        self.dropout_for_time_filter = main_stack['dropout_for_time_filter']
+        self.conv_list = main_stack['conv_list']
+        self.norms_list = main_stack['norms_list']
+        self.dropout_list = main_stack['dropout_list']
+        self._init_edge_modules(
+            self.checkin_embed_size, continuous_encoder_dim, cfg, prefix=''
+        )
+        self.linear = nn.Linear(self.checkin_embed_size, self.num_poi)
 
-        if self.modality_fusion == 'late':
-            # Late fusion: P/C/T/L each use embed_size channels through own hypergraph stacks.
-            self.checkin_embed_size = self.embed_size
-            continuous_encoder_dim = (
-                self.checkin_embed_size
+        self.late_stack = None
+        self.late_mlp = None
+        self.location_proj = None
+        if self.late_sequence in self.LATE_CHOICES:
+            late_cont_dim = (
+                self.embed_size
                 if cfg.conv_args.time_fusion_mode == 'add'
                 else cfg.model_args.st_embed_size
             )
-            self.location_proj = nn.Linear(2, self.embed_size)
-            self.late_streams = nn.ModuleDict({
-                name: self._build_hg_stack(self.embed_size, continuous_encoder_dim, cfg)
-                for name in ('P', 'C', 'T', 'L')
-            })
-            self._init_edge_modules(self.embed_size, continuous_encoder_dim, cfg)
-            late_in = 4 * self.embed_size + self.embed_size  # P,C,T,L + user
+            self.late_stack = self._build_hg_stack(self.embed_size, late_cont_dim, cfg)
+            self._init_edge_modules(self.embed_size, late_cont_dim, cfg, prefix='late_')
+            if self.late_sequence == 'location':
+                self.location_proj = nn.Linear(2, self.embed_size)
+            late_in = self.checkin_embed_size + self.embed_size
             self.late_mlp = nn.Sequential(
                 nn.Linear(late_in, late_in),
                 nn.ReLU(),
                 nn.Linear(late_in, self.num_poi),
             )
-            self.linear = None  # unused on late path
-        else:
-            # Paper / early fusion: concat modalities in CheckinEmbedding, then one hypergraph stack.
-            self.checkin_embed_size = self.checkin_embedding_layer.output_embed_size
-            continuous_encoder_dim = (
-                self.checkin_embed_size
-                if cfg.conv_args.time_fusion_mode == 'add'
-                else cfg.model_args.st_embed_size
-            )
-            early_stack = self._build_hg_stack(self.checkin_embed_size, continuous_encoder_dim, cfg)
-            self.conv_for_time_filter = early_stack['conv_for_time_filter']
-            self.norms_for_time_filter = early_stack['norms_for_time_filter']
-            self.dropout_for_time_filter = early_stack['dropout_for_time_filter']
-            self.conv_list = early_stack['conv_list']
-            self.norms_list = early_stack['norms_list']
-            self.dropout_list = early_stack['dropout_list']
-            self._init_edge_modules(self.checkin_embed_size, continuous_encoder_dim, cfg)
-            self.linear = nn.Linear(self.checkin_embed_size, self.num_poi)
 
         self.loss_func = nn.CrossEntropyLoss()
 
-    def _init_edge_modules(self, channel_size, continuous_encoder_dim, cfg):
-        self.edge_type_embedding_layer = EdgeEmbedding(
-            embed_size=channel_size,
-            fusion_type=self.embed_fusion_type,
-            num_edge_type=cfg.model_args.num_edge_type
-        )
-        if self.generate_edge_attr:
-            self.edge_attr_embedding_layer = EdgeEmbedding(
+    def _init_edge_modules(self, channel_size, continuous_encoder_dim, cfg, prefix=''):
+        """Create edge/time/distance modules; ``prefix=''`` (paper) or ``'late_'``."""
+        setattr(
+            self,
+            f'{prefix}edge_type_embedding_layer',
+            EdgeEmbedding(
                 embed_size=channel_size,
                 fusion_type=self.embed_fusion_type,
-                num_edge_type=cfg.model_args.num_edge_type
+                num_edge_type=cfg.model_args.num_edge_type,
+            ),
+        )
+        if self.generate_edge_attr:
+            edge_attr = EdgeEmbedding(
+                embed_size=channel_size,
+                fusion_type=self.embed_fusion_type,
+                num_edge_type=cfg.model_args.num_edge_type,
             )
         else:
             if cfg.conv_args.edge_fusion_mode == 'add':
-                self.edge_attr_embedding_layer = nn.Linear(3, channel_size)
+                edge_attr = nn.Linear(3, channel_size)
             else:
-                self.edge_attr_embedding_layer = None
+                edge_attr = None
+        setattr(self, f'{prefix}edge_attr_embedding_layer', edge_attr)
 
-        self.continuous_time_encoder = TimeEncoder(cfg.model_args, continuous_encoder_dim)
+        setattr(
+            self,
+            f'{prefix}continuous_time_encoder',
+            TimeEncoder(cfg.model_args, continuous_encoder_dim),
+        )
         if self.distance_encoder_type == 'stan':
-            self.continuous_distance_encoder = DistanceEncoderSTAN(
+            dist = DistanceEncoderSTAN(
                 cfg.model_args, continuous_encoder_dim, cfg.dataset_args.spatial_slots
             )
         elif self.distance_encoder_type == 'time':
-            self.continuous_distance_encoder = TimeEncoder(cfg.model_args, continuous_encoder_dim)
+            dist = TimeEncoder(cfg.model_args, continuous_encoder_dim)
         elif self.distance_encoder_type == 'hstlstm':
-            self.continuous_distance_encoder = DistanceEncoderHSTLSTM(
+            dist = DistanceEncoderHSTLSTM(
                 cfg.model_args, continuous_encoder_dim, cfg.dataset_args.spatial_slots
             )
         elif self.distance_encoder_type == 'simple':
-            self.continuous_distance_encoder = DistanceEncoderSimple(
+            dist = DistanceEncoderSimple(
                 cfg.model_args, continuous_encoder_dim, cfg.dataset_args.spatial_slots
             )
         else:
             raise ValueError(
                 f"Get wrong distance_encoder_type argument: {cfg.model_args.distance_encoder_type}!"
             )
+        setattr(self, f'{prefix}continuous_distance_encoder', dist)
+
+    def _edge_bundle(self, prefix=''):
+        return {
+            'edge_type_embedding_layer': getattr(self, f'{prefix}edge_type_embedding_layer'),
+            'edge_attr_embedding_layer': getattr(self, f'{prefix}edge_attr_embedding_layer'),
+            'continuous_time_encoder': getattr(self, f'{prefix}continuous_time_encoder'),
+            'continuous_distance_encoder': getattr(self, f'{prefix}continuous_distance_encoder'),
+        }
 
     def _build_hg_stack(self, channel_size, continuous_encoder_dim, cfg):
         """One hypergraph encoder stack (time-filter ci2traj + optional traj2traj hops)."""
@@ -204,6 +234,16 @@ class STHGCN(nn.Module):
         stack['dropout_list'] = dropout_list
         return stack
 
+    def _main_stack(self):
+        return {
+            'conv_for_time_filter': self.conv_for_time_filter,
+            'norms_for_time_filter': self.norms_for_time_filter,
+            'dropout_for_time_filter': self.dropout_for_time_filter,
+            'conv_list': self.conv_list,
+            'norms_list': self.norms_list,
+            'dropout_list': self.dropout_list,
+        }
+
     def _batch_size(self, label, mode):
         if label is not None:
             return int(label.size(0))
@@ -211,26 +251,28 @@ class STHGCN(nn.Module):
             return self.eval_batch_size
         return self.batch_size
 
-    def _hypergraph_encode(self, x, data, label, mode, stack, channel_size):
-        """Run one modality (or early fused) feature tensor through a hypergraph stack."""
+    def _hypergraph_encode(self, x, data, label, mode, stack, channel_size, edge_prefix=''):
+        """Run a feature tensor through a hypergraph stack (+ matching edge modules)."""
+        edges = self._edge_bundle(edge_prefix)
         if self.hypergraph_edges == 'none':
             batch_size = self._batch_size(label, mode)
-            # Late none-path passes check-in-only features [N_ci, D].
             if x.size(0) > 0:
                 return x.mean(dim=0, keepdim=True).expand(batch_size, -1)
             return torch.zeros(batch_size, channel_size, device=x.device, dtype=x.dtype)
 
-        edge_time_embed = self.continuous_time_encoder(data['delta_ts'][0] / (60 * 60))
+        edge_time_embed = edges['continuous_time_encoder'](data['delta_ts'][0] / (60 * 60))
         if self.distance_encoder_type == 'stan':
-            edge_distance_embed = self.continuous_distance_encoder(data['delta_ss'][0], dist_type='ch2tj')
+            edge_distance_embed = edges['continuous_distance_encoder'](
+                data['delta_ss'][0], dist_type='ch2tj'
+            )
         else:
-            edge_distance_embed = self.continuous_distance_encoder(data['delta_ss'][0])
+            edge_distance_embed = edges['continuous_distance_encoder'](data['delta_ss'][0])
 
         edge_attr_embed, edge_type_embed = None, None
         if data['edge_type'][0] is not None:
             if self.generate_edge_attr:
-                edge_attr_embed = self.edge_attr_embedding_layer(data['edge_type'][0])
-            edge_type_embed = self.edge_type_embedding_layer(data['edge_type'][0])
+                edge_attr_embed = edges['edge_attr_embedding_layer'](data['edge_type'][0])
+            edge_type_embed = edges['edge_type_embedding_layer'](data['edge_type'][0])
 
         if self.do_ci2traj and data['edge_index'][0] is not None:
             x_for_time_filter = stack['conv_for_time_filter'](
@@ -267,20 +309,24 @@ class STHGCN(nn.Module):
                 if self.hypergraph_edges == 'traj2traj' and idx == 0:
                     x = x[: edge_index.sparse_sizes()[0]]
                     continue
-                edge_time_embed = self.continuous_time_encoder(delta_ts / (60 * 60))
+                edge_time_embed = edges['continuous_time_encoder'](delta_ts / (60 * 60))
                 if self.distance_encoder_type == 'stan':
-                    edge_distance_embed = self.continuous_distance_encoder(delta_dis, dist_type='tj2tj')
+                    edge_distance_embed = edges['continuous_distance_encoder'](
+                        delta_dis, dist_type='tj2tj'
+                    )
                 else:
-                    edge_distance_embed = self.continuous_distance_encoder(delta_dis)
+                    edge_distance_embed = edges['continuous_distance_encoder'](delta_dis)
 
                 edge_attr_embed, edge_type_embed = None, None
                 if edge_type is not None:
-                    edge_type_embed = self.edge_type_embedding_layer(edge_type)
+                    edge_type_embed = edges['edge_type_embedding_layer'](edge_type)
                     if self.generate_edge_attr:
-                        edge_attr_embed = self.edge_attr_embedding_layer(edge_type)
+                        edge_attr_embed = edges['edge_attr_embedding_layer'](edge_type)
                     else:
-                        if self.edge_attr_embedding_layer:
-                            edge_attr_embed = self.edge_attr_embedding_layer(edge_attr.to(torch.float32))
+                        if edges['edge_attr_embedding_layer']:
+                            edge_attr_embed = edges['edge_attr_embedding_layer'](
+                                edge_attr.to(torch.float32)
+                            )
                         else:
                             edge_attr_embed = edge_attr.to(torch.float32)
 
@@ -305,122 +351,64 @@ class STHGCN(nn.Module):
             x = x_for_time_filter
         return x
 
-    def _aggregate_user_to_queries(self, user_ci, data, n_query, split_idx):
-        """Mean-pool check-in user embeds onto query trajs via time-filtered ci2traj edges."""
-        device = user_ci.device
-        dtype = user_ci.dtype
-        if data.get('edge_index') is None or data['edge_index'][0] is None:
-            if user_ci.size(0) == 0:
-                return torch.zeros(n_query, user_ci.size(-1), device=device, dtype=dtype)
-            return user_ci.mean(dim=0, keepdim=True).expand(n_query, -1)
-
-        st = data['edge_index'][0]
-        row = st.storage.row()
-        col = st.storage.col()
-        # col indexes into full node feature space (traj | checkin); map to check-in rows.
-        checkin_idx = col - (split_idx + 1)
-        valid = (checkin_idx >= 0) & (checkin_idx < user_ci.size(0)) & (row < n_query)
-        if not valid.any():
-            if user_ci.size(0) == 0:
-                return torch.zeros(n_query, user_ci.size(-1), device=device, dtype=dtype)
-            return user_ci.mean(dim=0, keepdim=True).expand(n_query, -1)
-
-        row_v = row[valid]
-        src = user_ci[checkin_idx[valid]]
-        out = torch.zeros(n_query, user_ci.size(-1), device=device, dtype=dtype)
-        counts = torch.zeros(n_query, 1, device=device, dtype=dtype)
-        out.index_add_(0, row_v, src)
-        counts.index_add_(0, row_v, torch.ones(row_v.size(0), 1, device=device, dtype=dtype))
-        out = out / counts.clamp(min=1.0)
-        empty = (counts.squeeze(-1) == 0)
-        if empty.any() and user_ci.size(0) > 0:
-            out[empty] = user_ci.mean(dim=0)
-        return out
+    def _encode_checkin_nodes(self, checkin_feature, data, label, mode, stack, channel_size, edge_prefix=''):
+        """Wrap check-in features with traj zeros (or mean-pool when edges=none)."""
+        split_idx = data['split_index']
+        if self.hypergraph_edges == 'none':
+            return self._hypergraph_encode(
+                checkin_feature, data, label, mode, stack, channel_size, edge_prefix
+            )
+        traj_zeros = torch.zeros(
+            split_idx + 1,
+            channel_size,
+            device=checkin_feature.device,
+            dtype=checkin_feature.dtype,
+        )
+        x = torch.cat([traj_zeros, checkin_feature], dim=0)
+        return self._hypergraph_encode(
+            x, data, label, mode, stack, channel_size, edge_prefix
+        )
 
     def forward(self, data, label=None, mode='train'):
-        if self.modality_fusion == 'late':
-            return self._forward_late(data, label=label, mode=mode)
-        return self._forward_early(data, label=label, mode=mode)
-
-    def _forward_early(self, data, label=None, mode='train'):
         input_x = data['x']  # [?, 8]
         split_idx = data['split_index']
+        check_in_x = input_x[split_idx + 1:]
 
-        check_in_x = input_x[split_idx+1:]
-        checkin_feature = self.checkin_embedding_layer(check_in_x)
-        trajectory_feature = torch.zeros(
-            split_idx+1,
+        # Fused / paper path: exclude the pulled-out P/C/T slot (location not in concat).
+        exclude = self.late_sequence if self.late_sequence in ('poi', 'category', 'time') else None
+        checkin_feature = self.checkin_embedding_layer(check_in_x, exclude=exclude)
+        main_out = self._encode_checkin_nodes(
+            checkin_feature,
+            data,
+            label,
+            mode,
+            self._main_stack(),
             self.checkin_embed_size,
-            device=checkin_feature.device
+            edge_prefix='',
         )
-        x = torch.cat([trajectory_feature, checkin_feature], dim=0)
 
-        if self.hypergraph_edges == 'none':
-            batch_size = self._batch_size(label, mode)
-            if checkin_feature.size(0) > 0:
-                pooled = checkin_feature.mean(dim=0, keepdim=True).expand(
-                    min(batch_size, x.size(0)), -1
-                )
-                x = pooled
-            else:
-                x = x[:batch_size]
-            logits = self.linear(x)
+        if self.late_sequence not in self.LATE_CHOICES:
+            # Paper scorer: Linear only (no extra MLP).
+            logits = self.linear(main_out)
             loss = self.loss_func(logits, label.long())
             return logits, loss
 
-        stack = {
-            'conv_for_time_filter': self.conv_for_time_filter,
-            'norms_for_time_filter': self.norms_for_time_filter,
-            'dropout_for_time_filter': self.dropout_for_time_filter,
-            'conv_list': self.conv_list,
-            'norms_list': self.norms_list,
-            'dropout_list': self.dropout_list,
-        }
-        x = self._hypergraph_encode(
-            x, data, label, mode, stack, self.checkin_embed_size
+        # Pulled-out sequence on its own HG stack.
+        pulled = self.checkin_embedding_layer.sequence_feature(check_in_x, self.late_sequence)
+        if self.late_sequence == 'location':
+            pulled = self.location_proj(pulled)
+        late_out = self._encode_checkin_nodes(
+            pulled,
+            data,
+            label,
+            mode,
+            self.late_stack,
+            self.embed_size,
+            edge_prefix='late_',
         )
-        logits = self.linear(x)
-        loss = self.loss_func(logits, label.long())
-        return logits, loss
-
-    def _forward_late(self, data, label=None, mode='train'):
-        """P/C/T/L each through own hypergraph stack; concat (+user) → MLP → POI logits."""
-        input_x = data['x']
-        split_idx = data['split_index']
-        check_in_x = input_x[split_idx+1:]
-        mods = self.checkin_embedding_layer.forward_modalities(check_in_x)
-        loc_emb = self.location_proj(mods['L_raw'])
-
-        modality_feats = {
-            'P': mods['P'],
-            'C': mods['C'],
-            'T': mods['T'],
-            'L': loc_emb,
-        }
-
-        encoded = {}
-        for name, feat in modality_feats.items():
-            if self.hypergraph_edges == 'none':
-                encoded[name] = self._hypergraph_encode(
-                    feat, data, label, mode, self.late_streams[name], self.embed_size
-                )
-            else:
-                traj_zeros = torch.zeros(
-                    split_idx + 1, self.embed_size, device=feat.device, dtype=feat.dtype
-                )
-                x = torch.cat([traj_zeros, feat], dim=0)
-                encoded[name] = self._hypergraph_encode(
-                    x, data, label, mode, self.late_streams[name], self.embed_size
-                )
-
-        # Align batch rows across streams (should already match).
-        n_query = encoded['P'].size(0)
-        user_q = self._aggregate_user_to_queries(
-            mods['user'], data, n_query, split_idx
-        )
-        fused = torch.cat(
-            [encoded['P'], encoded['C'], encoded['T'], encoded['L'], user_q], dim=-1
-        )
+        # Align rows if a partial batch somehow differs (should match).
+        n = min(main_out.size(0), late_out.size(0))
+        fused = torch.cat([main_out[:n], late_out[:n]], dim=-1)
         logits = self.late_mlp(fused)
         loss = self.loss_func(logits, label.long())
         return logits, loss

@@ -13,7 +13,7 @@ GPU：`conf/std_conf/$city.yml` 里 `run_args.gpu`（`0`=CUDA0）；CLI **`--gpu
 | `--hypergraph_edges {both,ci2traj,traj2traj,none}` | `both` | 控制前向消息传递：`both`=ci2traj+traj2traj；`ci2traj`=仅时间掩码后的 check-in→traj；`traj2traj`=跳过 ci2traj 层；`none`=不做超图卷积，对 check-in embed 均值池化后线性打分。`traj2traj` 的 residual skip（`x_target`→`x_skip`）按 hop 的 `sparse_sizes()[0]` 对齐，避免末 batch 上 `eval_batch_size`（如 64）对上 `out`（如 40）。 |
 | `--graph_scope {full,train}` | `full` | `full`：超图来自 `sample.csv`=train∪val∪test（论文）。`train`：图内保留 train trail + 当前 eval query trail 的 check-in；**traj2traj 邻居仅限 train trail**；`generate_hypergraph_from_file` 在建图前用 `ensure_dense_check_ins_id` / `ensure_dense_traj_id` 稠密化内存中的 check-in 与 traj id（已稠密则 no-op），避免 `filter_chunk` 的 `he_size` 越界。preprocess 缓存目录会变为 `preprocessed_scope-train_prefix-*`。 |
 | `--unseen_prefix_poi {unk,drop}` | `unk` | `unk`：前缀未见 POI → `padding_poi_id`（论文）。`drop`：若当前 trail **前缀**任一点 POI 不在 train，**丢弃整条 eval 样本**（目标/用户未见过滤仍走 `remove_unseen_user_poi`）。 |
-| `--modality_fusion {early,late}` | `early` | 真实融合点在 `CheckinEmbedding`（early）与超图编码器 `HypergraphTransformer` 之间。`early`：先把 user+POI+category+weekday+hour **concat** 成 check-in 向量，再进**一条**超图卷积栈，最后 `Linear→` POI logits（论文）。`late`：P / C / T / L（lon/lat→`Linear(2,D)`）各自走**独立**超图栈（各自权重、编码前不 concat），再与 user 向量 concat，经 MLP 得到 POI logits；user 仍默认保留（关 user 另传 `--use_user_embed off`）。 |
+| `--late_sequence {none,poi,category,time,location}` | `none` | 真实编码器是 `HypergraphTransformer` 超图卷积栈。`none`：论文路径——`CheckinEmbedding` 把 user+POI+category+weekday+hour **concat** 后进**一条**超图栈，再 `Linear→` POI logits（**无**额外 MLP）。非 `none`：每次只**拉出一条**序列单独编码（自有超图栈）；其余序列仍走论文 fused 路径（P/C/T 被拉出时在 early concat 对应槽位置零；`location` 本就不在论文 concat 中，主路径不变）；softmax 前再 `concat(主表示, 拉出表示)+MLP`。user 始终留在 fused 路径。一跑一条，共四个单因素设置。 |
 | `--gpu INT` | yaml | 覆盖 `run_args.gpu`；CPU 用 `-1`。 |
 
 ## 输出目录与 run_name
@@ -28,7 +28,10 @@ GPU：`conf/std_conf/$city.yml` 里 `run_args.gpu`（`0`=CUDA0）；CLI **`--gpu
 | `--hypergraph_edges none` | `edges_none` |
 | `--graph_scope train` | `scope_train` |
 | `--unseen_prefix_poi drop` | `prefix_drop` |
-| `--modality_fusion late` | `fusion_late` |
+| `--late_sequence poi` | `late_poi` |
+| `--late_sequence category` | `late_category` |
+| `--late_sequence time` | `late_time` |
+| `--late_sequence location` | `late_location` |
 
 布局（log / tensorboard / checkpoint 都在同一 run 目录下）：
 
@@ -48,16 +51,16 @@ results/<city>/<run_name>/<YYYYMMDD_HHMMSS>/
 每次 test 结束追加一行到 **`results/summary.csv`**（无则写表头）：
 
 ```csv
-time,city,run_name,use_user_embed,hypergraph_edges,graph_scope,unseen_prefix_poi,modality_fusion,gpu,Recall@1,Recall@5,Recall@10,Recall@20,MRR,log_dir
-20261117_193012,beijing,paper,on,both,full,unk,early,-1,0.453,0.653,0.747,0.813,0.541,results/beijing/paper/20261117_193012
-20261117_194500,beijing,no_user,off,both,full,unk,early,-1,0.410,0.600,0.700,0.780,0.500,results/beijing/no_user/20261117_194500
+time,city,run_name,use_user_embed,hypergraph_edges,graph_scope,unseen_prefix_poi,late_sequence,gpu,Recall@1,Recall@5,Recall@10,Recall@20,MRR,log_dir
+20261117_193012,beijing,paper,on,both,full,unk,none,-1,0.453,0.653,0.747,0.813,0.541,results/beijing/paper/20261117_193012
+20261117_194500,beijing,no_user,off,both,full,unk,none,-1,0.410,0.600,0.700,0.780,0.500,results/beijing/no_user/20261117_194500
 ```
 
 同 city+run_name 不同时间戳各占一行，不覆盖。`summary.csv` 另含 `seed`（runner / `--seed` 用）。
 
 ## 批量消融 runner（mean±std）
 
-一键跑完整 suite（`paper` + 七个单因素：`no_user` / `edges_*` / `scope_train` / `prefix_drop` / `fusion_late`），每配置 `--runs` 次不同 seed；**每跑完一个 city+run_name+seed 就写入/fsync `summary.csv` 并刷新 mean±std**，崩溃后用**同一条命令**接着跑（已完成的 skip；省略 `--seeds` 时种子落在 `results/ablation_seeds.json` 以便 resume 一致）：
+一键跑完整 suite（`paper` + 单因素：`no_user` / `edges_*` / `scope_train` / `prefix_drop` / `late_poi` / `late_category` / `late_time` / `late_location`），每配置 `--runs` 次不同 seed；**每跑完一个 city+run_name+seed 就写入/fsync `summary.csv` 并刷新 mean±std**，崩溃后用**同一条命令**接着跑（已完成的 skip；省略 `--seeds` 时种子落在 `results/ablation_seeds.json` 以便 resume 一致）：
 
 - `results/ablation_summary.csv` — 每行 `city+run_name`：`n` 与 Recall@1/5/10/20、MRR 的 mean / sample std（`ddof=1`；`n=1` 时 std 留空；`n`=已完成 seed 数）
 - `results/ablation_summary.md` — 按城一张表（`paper` 行在前），单元格为 `mean±std`（由 csv 生成）
@@ -100,9 +103,12 @@ python3 run.py -f std_conf/${city}.yml --gpu -1 --graph_scope train
 python3 run.py -f std_conf/${city}.yml --gpu -1 --unseen_prefix_poi unk
 python3 run.py -f std_conf/${city}.yml --gpu -1 --unseen_prefix_poi drop
 
-# 5) 模态融合（early=论文；late → results/<city>/fusion_late/<ts>/）
-python3 run.py -f std_conf/${city}.yml --gpu -1 --modality_fusion early
-python3 run.py -f std_conf/${city}.yml --gpu -1 --modality_fusion late
+# 5) 单序列 late pull-out（none=论文；各 → results/<city>/late_*/<ts>/）
+python3 run.py -f std_conf/${city}.yml --gpu -1 --late_sequence none
+python3 run.py -f std_conf/${city}.yml --gpu -1 --late_sequence poi
+python3 run.py -f std_conf/${city}.yml --gpu -1 --late_sequence category
+python3 run.py -f std_conf/${city}.yml --gpu -1 --late_sequence time
+python3 run.py -f std_conf/${city}.yml --gpu -1 --late_sequence location
 ```
 
 验证 CLI：`python3 utils/ablation_cli.py -h` / `python3 scripts/run_ablations.py -h`（不加载 PyG）。  
