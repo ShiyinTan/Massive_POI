@@ -38,17 +38,52 @@ class CheckinEmbedding(nn.Module):
         else:
             raise ValueError(f"Get wrong fusion type {self.fusion_type}")
 
-    def forward(self, data):
+    def sequence_feature(self, data, sequence):
+        """Single-sequence embedding for late pull-out.
+
+        ``sequence`` in ``{poi, category, time, location}``.
+        time = weekday+hour (sum); location returns raw lon/lat ``[..., 2]``.
+        """
+        if sequence == 'poi':
+            return self.poi_embedding(data[..., 1].long())
+        if sequence == 'category':
+            return self.category_embedding(data[..., 2].long())
+        if sequence == 'time':
+            return self.dayofweek_embedding(data[..., 6].long()) + self.hourofday_embedding(
+                data[..., 7].long()
+            )
+        if sequence == 'location':
+            poi_ref = self.poi_embedding(data[..., 1].long())
+            return data[..., 4:6].to(dtype=poi_ref.dtype)
+        raise ValueError(f"Unknown late sequence {sequence}")
+
+    def forward(self, data, exclude=None):
+        """Paper concat of user+poi+category+weekday+hour.
+
+        When ``exclude`` is ``poi`` / ``category`` / ``time``, that sequence's
+        slot(s) are zeroed so the remaining modalities keep the same concat
+        layout and encoder width as the paper. ``location`` is not in the
+        paper concat (caller handles it on a separate path).
+        """
         user_emb = self.user_embedding(data[..., 0].long())
         if not self.use_user_embed:
             user_emb = torch.zeros_like(user_emb)
-        embedding_list = [
-            user_emb,
-            self.poi_embedding(data[..., 1].long()),
-            self.category_embedding(data[..., 2].long()),
-            self.dayofweek_embedding(data[..., 6].long()),
-            self.hourofday_embedding(data[..., 7].long())
-        ]
+        poi_emb = self.poi_embedding(data[..., 1].long())
+        cat_emb = self.category_embedding(data[..., 2].long())
+        dow_emb = self.dayofweek_embedding(data[..., 6].long())
+        hour_emb = self.hourofday_embedding(data[..., 7].long())
+
+        if exclude == 'poi':
+            poi_emb = torch.zeros_like(poi_emb)
+        elif exclude == 'category':
+            cat_emb = torch.zeros_like(cat_emb)
+        elif exclude == 'time':
+            dow_emb = torch.zeros_like(dow_emb)
+            hour_emb = torch.zeros_like(hour_emb)
+        elif exclude not in (None, 'none', 'location'):
+            raise ValueError(f"Unsupported exclude={exclude}")
+
+        embedding_list = [user_emb, poi_emb, cat_emb, dow_emb, hour_emb]
         if self.fusion_type == 'concat':
             self.output_embed_size = len(embedding_list) * self.embed_size
             return torch.cat(embedding_list, -1)

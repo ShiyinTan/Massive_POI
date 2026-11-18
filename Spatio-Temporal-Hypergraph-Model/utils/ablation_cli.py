@@ -39,6 +39,14 @@ def build_arg_parser() -> argparse.ArgumentParser:
         help="unk=map train-unseen prefix POI to padding (paper). drop=drop eval sample if any prefix POI unseen. Default: unk.",
     )
     parser.add_argument(
+        "--late_sequence",
+        choices=["none", "poi", "category", "time", "location"],
+        default="none",
+        help="Pull out one sequence onto its own hypergraph stack; others stay on the "
+        "paper fused path; fuse with concat+MLP just before softmax. "
+        "none=paper path (no extra MLP). Default: none.",
+    )
+    parser.add_argument(
         "--gpu",
         type=int,
         default=None,
@@ -61,6 +69,7 @@ def apply_ablation_args(cfg, args):
         cfg.model_args.do_traj2traj = False
     cfg.dataset_args.graph_scope = args.graph_scope
     cfg.dataset_args.unseen_prefix_poi = args.unseen_prefix_poi
+    cfg.model_args.late_sequence = args.late_sequence
     if args.gpu is not None:
         cfg.run_args.gpu = args.gpu
     if getattr(args, "seed", None) is not None:
@@ -73,7 +82,8 @@ def ablation_run_name(args) -> str:
 
     All defaults → ``paper``. Otherwise only non-default tokens, joined by ``__``:
     ``no_user``, ``edges_ci2traj``, ``edges_traj2traj``, ``edges_none``,
-    ``scope_train``, ``prefix_drop``.
+    ``scope_train``, ``prefix_drop``, ``late_poi``, ``late_category``,
+    ``late_time``, ``late_location``.
     """
     parts = []
     if getattr(args, "use_user_embed", "on") != "on":
@@ -85,6 +95,9 @@ def ablation_run_name(args) -> str:
         parts.append("scope_train")
     if getattr(args, "unseen_prefix_poi", "unk") != "unk":
         parts.append("prefix_drop")
+    late = getattr(args, "late_sequence", "none")
+    if late != "none":
+        parts.append(f"late_{late}")
     return "paper" if not parts else "__".join(parts)
 
 
