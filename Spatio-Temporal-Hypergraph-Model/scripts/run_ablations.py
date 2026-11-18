@@ -38,7 +38,24 @@ assert _spec.loader is not None
 _spec.loader.exec_module(_ablation_cli)
 ablation_run_name = _ablation_cli.ablation_run_name
 
-CITIES = ("beijing", "tokyo", "shanghai", "melbourne")
+# Every Massive-STEPS city folder / std_conf/<city>.yml name.
+CITIES = (
+    "bandung",
+    "beijing",
+    "istanbul",
+    "jakarta",
+    "kuwait_city",
+    "melbourne",
+    "moscow",
+    "new_york",
+    "palembang",
+    "petaling_jaya",
+    "sao_paulo",
+    "shanghai",
+    "sydney",
+    "tangerang",
+    "tokyo",
+)
 METRICS = ("Recall@1", "Recall@5", "Recall@10", "Recall@20", "MRR")
 PAPER_SEED = 54607333
 
@@ -71,7 +88,10 @@ def build_parser() -> argparse.ArgumentParser:
         action="append",
         choices=list(CITIES),
         default=None,
-        help="City to run (repeatable). Default: beijing.",
+        help=(
+            "Massive-STEPS city / std_conf/<city>.yml (repeatable). "
+            "Default: beijing. Missing yaml → hard fail (no silent skip)."
+        ),
     )
     p.add_argument("--runs", type=int, default=5, help="Repeats per ablation. Default: 5.")
     p.add_argument(
@@ -365,37 +385,37 @@ def mean_std(values: List[float]) -> Tuple[float, Optional[float]]:
     return mu, math.sqrt(var)
 
 
-def aggregate_rows(
-    rows: Sequence[dict],
+def aggregate_key(city: str, run_name: str, group: Sequence[dict]) -> dict:
+    """Mean±std for one city+run_name from finished summary.csv rows."""
+    row: dict = {"city": city, "run_name": run_name, "n": len(group)}
+    for m in METRICS:
+        vals = [_to_float(r.get(m)) for r in group]
+        vals = [v for v in vals if v is not None]
+        mu, sd = mean_std(vals)
+        row[f"{m}_mean"] = mu
+        row[f"{m}_std"] = "" if sd is None else sd
+    return row
+
+
+def aggregate_rows_for_cities(
+    summary_rows: Sequence[dict],
     cities: Sequence[str],
-) -> List[dict]:
-    """One aggregated row per city+run_name (suite order, paper first)."""
-    buckets: Dict[Tuple[str, str], List[dict]] = defaultdict(list)
+) -> Dict[Tuple[str, str], dict]:
+    """Recompute aggregates from summary.csv for the given cities only."""
     city_set = set(cities)
-    suite_set = set(SUITE_ORDER)
-    for r in rows:
+    buckets: Dict[Tuple[str, str], List[dict]] = defaultdict(list)
+    for r in summary_rows:
         city = (r.get("city") or "").strip()
         run_name = (r.get("run_name") or "").strip()
-        if city not in city_set or run_name not in suite_set:
+        if city not in city_set or not run_name:
             continue
         if any(_to_float(r.get(m)) is None for m in METRICS):
             continue
         buckets[(city, run_name)].append(r)
 
-    out: List[dict] = []
-    for city in cities:
-        for run_name in SUITE_ORDER:
-            group = buckets.get((city, run_name), [])
-            if not group:
-                continue
-            row: dict = {"city": city, "run_name": run_name, "n": len(group)}
-            for m in METRICS:
-                vals = [_to_float(r[m]) for r in group]
-                vals = [v for v in vals if v is not None]
-                mu, sd = mean_std(vals)
-                row[f"{m}_mean"] = mu
-                row[f"{m}_std"] = "" if sd is None else sd
-            out.append(row)
+    out: Dict[Tuple[str, str], dict] = {}
+    for (city, run_name), group in buckets.items():
+        out[(city, run_name)] = aggregate_key(city, run_name, group)
     return out
 
 
@@ -404,6 +424,56 @@ ABLATION_SUMMARY_HEADER = (
     + [f"{m}_mean" for m in METRICS]
     + [f"{m}_std" for m in METRICS]
 )
+
+
+def ablation_summary_csv_path(root: str) -> str:
+    return osp.join(root, "results", "ablation_summary.csv")
+
+
+def ablation_summary_md_path(root: str) -> str:
+    return osp.join(root, "results", "ablation_summary.md")
+
+
+def load_ablation_summary_map(path: str) -> Dict[Tuple[str, str], dict]:
+    """Existing ablation_summary.csv → {(city, run_name): row}."""
+    rows = load_summary_rows(path)
+    out: Dict[Tuple[str, str], dict] = {}
+    for r in rows:
+        city = (r.get("city") or "").strip()
+        run_name = (r.get("run_name") or "").strip()
+        if not city or not run_name:
+            continue
+        out[(city, run_name)] = {k: r.get(k, "") for k in ABLATION_SUMMARY_HEADER}
+    return out
+
+
+def _city_sort_key(city: str) -> Tuple[int, str]:
+    try:
+        return (list(CITIES).index(city), city)
+    except ValueError:
+        return (len(CITIES), city)
+
+
+def _run_name_sort_key(run_name: str) -> Tuple[int, str]:
+    try:
+        return (SUITE_ORDER.index(run_name), run_name)
+    except ValueError:
+        return (len(SUITE_ORDER), run_name)
+
+
+def ordered_aggregate_rows(agg_map: Dict[Tuple[str, str], dict]) -> List[dict]:
+    keys = sorted(agg_map.keys(), key=lambda k: (_city_sort_key(k[0]), _run_name_sort_key(k[1])))
+    return [agg_map[k] for k in keys]
+
+
+def merge_ablation_summary(
+    existing: Dict[Tuple[str, str], dict],
+    updated: Dict[Tuple[str, str], dict],
+) -> Dict[Tuple[str, str], dict]:
+    """Keep history: update only keys present in ``updated``; leave others intact."""
+    merged = dict(existing)
+    merged.update(updated)
+    return merged
 
 
 def write_ablation_summary_csv(path: str, rows: Sequence[dict]) -> None:
@@ -424,16 +494,14 @@ def _fmt_mean_std(mean, std) -> str:
     return f"{mean_f:.4f}±{float(std):.4f}"
 
 
-def render_ablation_summary_md(rows: Sequence[dict], cities: Sequence[str]) -> str:
+def render_ablation_summary_md(rows: Sequence[dict]) -> str:
     lines: List[str] = ["# STHGCN ablation summary", ""]
     by_city: Dict[str, List[dict]] = defaultdict(list)
     for r in rows:
         by_city[r["city"]].append(r)
 
-    for city in cities:
-        city_rows = by_city.get(city, [])
-        if not city_rows:
-            continue
+    for city in sorted(by_city.keys(), key=_city_sort_key):
+        city_rows = sorted(by_city[city], key=lambda r: _run_name_sort_key(r["run_name"]))
         lines.append(f"## {city}")
         lines.append("")
         header = ["run_name", "n"] + list(METRICS)
@@ -449,23 +517,44 @@ def render_ablation_summary_md(rows: Sequence[dict], cities: Sequence[str]) -> s
 
 
 def write_summaries(root: str, cities: Sequence[str], quiet: bool = False) -> str:
-    rows = load_summary_rows(summary_csv_path(root))
-    agg = aggregate_rows(rows, cities)
-    csv_path = osp.join(root, "results", "ablation_summary.csv")
-    md_path = osp.join(root, "results", "ablation_summary.md")
-    write_ablation_summary_csv(csv_path, agg)
-    md = render_ablation_summary_md(agg, cities)
+    """Rebuild ablation_summary.{csv,md} by merging: update this invocation's
+    city+run_name aggregates from summary.csv; keep other cities/run_names."""
+    summary_rows = load_summary_rows(summary_csv_path(root))
+    csv_path = ablation_summary_csv_path(root)
+    md_path = ablation_summary_md_path(root)
+    existing = load_ablation_summary_map(csv_path)
+    updated = aggregate_rows_for_cities(summary_rows, cities)
+    merged = merge_ablation_summary(existing, updated)
+    ordered = ordered_aggregate_rows(merged)
+    write_ablation_summary_csv(csv_path, ordered)
+    md = render_ablation_summary_md(ordered)
     _fsync_write(md_path, md)
     if not quiet:
-        print(f"[ablation-runner] wrote {csv_path}")
+        print(f"[ablation-runner] wrote {csv_path} (merged; kept other cities/run_names)")
         print(f"[ablation-runner] wrote {md_path}")
     return md
+
+
+def require_city_yamls(root: str, cities: Sequence[str]) -> None:
+    """Hard-fail if conf/std_conf/<city>.yml is missing (no silent skip)."""
+    missing = []
+    for city in cities:
+        rel = osp.join("conf", "std_conf", f"{city}.yml")
+        path = osp.join(root, rel)
+        if not osp.isfile(path):
+            missing.append(rel)
+    if missing:
+        raise SystemExit(
+            "Missing city config yaml(s); refusing to run:\n  "
+            + "\n  ".join(missing)
+        )
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
     args = build_parser().parse_args(argv)
     cities = args.city or ["beijing"]
     root = _ROOT
+    require_city_yamls(root, cities)
     used_cli_seeds = args.seeds is not None
     seeds = resolve_seeds(root, cities, args.runs, args.seeds)
     resume_cmd = format_resume_command(
